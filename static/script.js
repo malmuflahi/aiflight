@@ -15,64 +15,57 @@ document.getElementById("searchForm").addEventListener("submit", async function(
     };
 
     if (!payload.departDate) {
-        alert("Please choose a departure date.");
+        alert("Choose a departure date.");
         return;
     }
 
     if (payload.tripType === "roundtrip" && !payload.returnDate) {
-        alert("Please choose a return date.");
+        alert("Choose a return date.");
         return;
     }
 
-    document.getElementById("status").innerHTML = "AIFLight is comparing value, time, and stress...";
+    document.getElementById("status").innerHTML = "AI is scanning the best price-defense strategy...";
+    document.getElementById("strategy").innerHTML = "";
     document.getElementById("results").innerHTML = "";
 
-    const response = await fetch("/api/search", {
+    const res = await fetch("/api/search", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
+    const data = await res.json();
 
     document.getElementById("status").innerHTML = data.ai_enabled
-        ? "Smart recommendations ready."
-        : "Smart demo mode active. Add OPENAI_API_KEY for fully dynamic AI advice.";
+        ? "AI price-defense strategy ready."
+        : "Smart mode active. Add OPENAI_API_KEY for deeper AI strategy.";
 
-    document.getElementById("results").innerHTML = data.results.map((flight, index) => `
-        <div class="card ${index === 0 ? "recommended" : ""}">
-            ${index === 0 ? `<div class="recommended-badge">Recommended for you</div>` : ""}
+    document.getElementById("strategy").innerHTML = `
+        <div class="strategy-box">
+            <h2>AI Price Defense Plan</h2>
+            <p>${data.strategy}</p>
+            <small>Route normalized: ${data.trip.origin} → ${data.trip.destination}</small>
+        </div>
+    `;
 
-            <div class="card-top">
-                <span class="rank">#${index + 1}</span>
-                <span class="price">$${flight.price}</span>
+    document.getElementById("results").innerHTML = data.cards.map((card, index) => `
+        <div class="card ${index === 0 ? "featured" : ""}">
+            ${index === 0 ? `<div class="ribbon">Recommended first</div>` : ""}
+            <h2>${card.title}</h2>
+            <p class="signal">${card.signal}</p>
+
+            <div class="metrics">
+                <div><strong>Status</strong><span>${card.status}</span></div>
+                <div><strong>Goal</strong><span>${card.goal}</span></div>
+                <div><strong>Risk</strong><span>${card.risk}</span></div>
             </div>
 
-            <h2>${flight.title}</h2>
-            <p class="badge-line">${flight.badge}</p>
-
-            <div class="details">
-                <p><strong>Airline:</strong> ${flight.airline}</p>
-                <p><strong>Route:</strong> ${data.trip.origin} → ${data.trip.destination}</p>
-                <p><strong>Trip:</strong> ${data.trip.trip_type === "roundtrip" ? "Round trip" : "One way"}</p>
-                <p><strong>Departure:</strong> ${data.trip.depart_date}</p>
-                ${data.trip.trip_type === "roundtrip" ? `<p><strong>Return:</strong> ${data.trip.return_date}</p>` : ""}
-                <p><strong>Passengers:</strong> ${data.trip.adults} adult(s), ${data.trip.children} child(ren), ${data.trip.infants} infant(s)</p>
-                <p><strong>Travel time:</strong> ${flight.duration}</p>
-                <p><strong>Stops:</strong> ${flight.stops === 0 ? "Nonstop" : flight.stops + " stop"}</p>
-                <p><strong>Stress level:</strong> ${flight.stress}</p>
-            </div>
-
-            <div class="advice-box">
-                <strong>What you gain & trade off</strong>
-                <p>${flight.advice}</p>
-            </div>
+            <p class="explain">${card.explanation}</p>
 
             <div class="buttons">
-                <a href="${flight.links.google}" target="_blank">View on Google Flights</a>
-                <a href="${flight.links.kayak}" target="_blank">View on Kayak</a>
-                <a href="${flight.links.skyscanner}" target="_blank">View on Skyscanner</a>
-                <a class="green" href="${flight.links.expedia}" target="_blank">Check / Buy Ticket</a>
+                <a href="${data.links.google}" target="_blank">Search Google Flights</a>
+                <a href="${data.links.kayak}" target="_blank">Search Kayak</a>
+                <a href="${data.links.skyscanner}" target="_blank">Search Skyscanner</a>
             </div>
         </div>
     `).join("");
