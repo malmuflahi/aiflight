@@ -1,29 +1,47 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Flight Search</title>
+    <title>AIFLight | AI Flight Search</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <h1>AI Flight Search</h1>
-    <p class="subtitle">AI compares price, time, comfort, and value — then explains the smartest choice.</p>
+
+<header class="hero">
+    <div class="nav">
+        <div class="logo">AIFLight</div>
+        <div class="tag">AI Travel Advisor</div>
+    </div>
+
+    <h1>Find the smartest flight, not just the cheapest.</h1>
+    <p>
+        AIFLight compares price, speed, comfort, and stops — then explains the best option like a real travel expert.
+    </p>
+</header>
+
+<section class="search-box">
+    <h2>Plan your trip</h2>
 
     <form id="searchForm">
-        <input id="from" placeholder="From: JFK" value="JFK">
-        <input id="to" placeholder="To: LAX" value="LAX">
+        <input id="origin" value="JFK" placeholder="From: JFK">
+        <input id="destination" value="LAX" placeholder="To: LAX">
 
         <select id="priority">
             <option value="balanced">Best overall</option>
             <option value="cheapest">Cheapest</option>
             <option value="fastest">Fastest, money not important</option>
-            <option value="comfort">Comfort: fewer stops</option>
+            <option value="comfort">Comfort, fewer stops</option>
         </select>
 
-        <button type="submit">Search Flights</button>
+        <textarea id="preference" placeholder="Tell AI what matters to you...">I want the best value. I can take a little longer if I save good money.</textarea>
+
+        <button type="submit">Ask AI to Find Flights</button>
     </form>
+</section>
 
-    <div id="results"></div>
+<section id="status"></section>
+<section id="results" class="results"></section>
 
-    <script src="/static/script.js"></script>
+<script src="/static/script.js"></script>
 </body>
 </html>
