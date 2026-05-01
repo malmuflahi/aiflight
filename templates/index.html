@@ -1,23 +1,29 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Flight Search</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    <h1>AI Flight Search</h1>
+    <p class="subtitle">AI compares price, time, comfort, and value — then explains the smartest choice.</p>
 
-<h1>AI Flight Search</h1>
+    <form id="searchForm">
+        <input id="from" placeholder="From: JFK" value="JFK">
+        <input id="to" placeholder="To: LAX" value="LAX">
 
-<form id="searchForm">
-    <input type="text" id="from" placeholder="From (NYC)">
-    <input type="text" id="to" placeholder="To (DXB)">
-    <button type="submit">Search</button>
-</form>
+        <select id="priority">
+            <option value="balanced">Best overall</option>
+            <option value="cheapest">Cheapest</option>
+            <option value="fastest">Fastest, money not important</option>
+            <option value="comfort">Comfort: fewer stops</option>
+        </select>
 
-<div id="results"></div>
+        <button type="submit">Search Flights</button>
+    </form>
 
-<script src="/static/script.js"></script>
+    <div id="results"></div>
+
+    <script src="/static/script.js"></script>
 </body>
 </html>
