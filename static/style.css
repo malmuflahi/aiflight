@@ -10,60 +10,79 @@ body {
 }
 
 .hero {
-    background: linear-gradient(135deg, #e0f2fe, #ffffff);
-    padding: 35px 22px 45px;
+    background: linear-gradient(135deg, #082f49, #0ea5e9);
+    color: white;
+    padding: 34px 22px 55px;
 }
 
 .nav {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 35px;
+    margin-bottom: 38px;
 }
 
 .logo {
-    font-size: 26px;
+    font-size: 28px;
     font-weight: 900;
-    color: #0284c7;
 }
 
 .tag {
-    background: #dbeafe;
-    color: #0369a1;
+    background: rgba(255,255,255,0.18);
     padding: 8px 12px;
     border-radius: 999px;
-    font-weight: bold;
     font-size: 13px;
+    font-weight: 800;
+}
+
+.eyebrow {
+    color: #bae6fd;
+    font-weight: 900;
 }
 
 h1 {
-    font-size: 44px;
+    font-size: 42px;
     line-height: 1;
     margin: 0 0 18px;
-    color: #082f49;
 }
 
 .hero p {
     font-size: 18px;
     line-height: 1.6;
-    color: #475569;
 }
 
 .search-box {
     background: white;
-    margin: -20px 18px 20px;
+    margin: -25px 18px 24px;
     padding: 22px;
-    border-radius: 22px;
-    box-shadow: 0 15px 40px rgba(2, 132, 199, 0.12);
+    border-radius: 24px;
+    box-shadow: 0 18px 45px rgba(2, 132, 199, 0.18);
 }
 
-.search-box h2 {
-    margin-top: 0;
+.helper {
+    color: #64748b;
 }
 
 form {
     display: grid;
-    gap: 12px;
+    gap: 13px;
+}
+
+.grid-two {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 13px;
+}
+
+.passengers {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+}
+
+label {
+    font-weight: 800;
+    color: #334155;
 }
 
 input, select, textarea {
@@ -72,6 +91,7 @@ input, select, textarea {
     border: 1px solid #cbd5e1;
     border-radius: 14px;
     font-size: 16px;
+    margin-top: 6px;
 }
 
 textarea {
@@ -83,7 +103,7 @@ button {
     color: white;
     border: none;
     border-radius: 14px;
-    padding: 15px;
+    padding: 16px;
     font-weight: 900;
     font-size: 16px;
 }
@@ -91,24 +111,39 @@ button {
 #status {
     margin: 20px;
     color: #0369a1;
-    font-weight: bold;
+    font-weight: 900;
 }
 
 .results {
     display: grid;
-    gap: 18px;
-    padding: 0 18px 40px;
+    gap: 20px;
+    padding: 0 18px 45px;
 }
 
 .card {
+    position: relative;
     background: white;
-    border-radius: 22px;
+    border-radius: 24px;
     padding: 22px;
-    box-shadow: 0 12px 35px rgba(15, 23, 42, 0.08);
-    border: 1px solid #e2e8f0;
+    border: 1px solid #dbeafe;
+    box-shadow: 0 14px 38px rgba(15, 23, 42, 0.08);
 }
 
-.top {
+.card.recommended {
+    border: 2px solid #0ea5e9;
+}
+
+.recommended-badge {
+    background: #0ea5e9;
+    color: white;
+    padding: 9px 12px;
+    border-radius: 999px;
+    display: inline-block;
+    font-weight: 900;
+    margin-bottom: 14px;
+}
+
+.card-top {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -123,25 +158,34 @@ button {
 }
 
 .price {
-    font-size: 32px;
-    font-weight: 900;
     color: #0284c7;
+    font-size: 34px;
+    font-weight: 900;
 }
 
 .card h2 {
     color: #082f49;
+    font-size: 32px;
 }
 
-.ai-box {
+.badge-line {
+    color: #0284c7;
+    font-weight: 900;
+}
+
+.details p {
+    margin: 9px 0;
+}
+
+.advice-box {
     background: #f0f9ff;
     border-left: 5px solid #0ea5e9;
-    padding: 15px;
-    border-radius: 14px;
-    margin-top: 15px;
+    padding: 16px;
+    border-radius: 16px;
+    margin-top: 16px;
 }
 
-.ai-box p {
-    margin-bottom: 0;
+.advice-box p {
     color: #334155;
     line-height: 1.6;
 }
@@ -168,6 +212,10 @@ button {
 }
 
 @media (min-width: 800px) {
+    .grid-two {
+        grid-template-columns: 1fr 1fr;
+    }
+
     .results {
         grid-template-columns: repeat(2, 1fr);
     }
