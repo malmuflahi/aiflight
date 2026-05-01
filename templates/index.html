@@ -1,41 +1,71 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AIFLight | AI Flight Search</title>
+    <title>AIFLight | AI Flight Decision Assistant</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
 <header class="hero">
-    <div class="nav">
+    <nav class="nav">
         <div class="logo">AIFLight</div>
         <div class="tag">AI Travel Advisor</div>
-    </div>
+    </nav>
 
-    <h1>Find the smartest flight, not just the cheapest.</h1>
-    <p>
-        AIFLight compares price, speed, comfort, and stops — then explains the best option like a real travel expert.
-    </p>
+    <div class="hero-text">
+        <p class="eyebrow">Less stress. Better flight decisions.</p>
+        <h1>We explain the best flight for you — before you spend a dollar.</h1>
+        <p>AIFLight compares price, time, stops, comfort, passengers, and trip type so you know exactly what you gain and what you trade off.</p>
+    </div>
 </header>
 
 <section class="search-box">
-    <h2>Plan your trip</h2>
+    <h2>Tell us what matters</h2>
+    <p class="helper">We’ll guide your decision, then send you to trusted booking sites.</p>
 
     <form id="searchForm">
-        <input id="origin" value="JFK" placeholder="From: JFK">
-        <input id="destination" value="LAX" placeholder="To: LAX">
+        <div class="grid-two">
+            <input id="origin" value="JFK" placeholder="From airport code: JFK">
+            <input id="destination" value="LAX" placeholder="To airport code: LAX">
+        </div>
 
-        <select id="priority">
-            <option value="balanced">Best overall</option>
-            <option value="cheapest">Cheapest</option>
-            <option value="fastest">Fastest, money not important</option>
-            <option value="comfort">Comfort, fewer stops</option>
+        <select id="tripType">
+            <option value="oneway">One way</option>
+            <option value="roundtrip">Round trip</option>
         </select>
 
-        <textarea id="preference" placeholder="Tell AI what matters to you...">I want the best value. I can take a little longer if I save good money.</textarea>
+        <div class="grid-two">
+            <label>Departure date
+                <input id="departDate" type="date">
+            </label>
+            <label>Return date
+                <input id="returnDate" type="date">
+            </label>
+        </div>
 
-        <button type="submit">Ask AI to Find Flights</button>
+        <div class="passengers">
+            <label>Adults
+                <input id="adults" type="number" min="1" value="1">
+            </label>
+            <label>Children
+                <input id="children" type="number" min="0" value="0">
+            </label>
+            <label>Infants
+                <input id="infants" type="number" min="0" value="0">
+            </label>
+        </div>
+
+        <select id="priority">
+            <option value="balanced">Best value</option>
+            <option value="cheapest">Cheapest option</option>
+            <option value="fastest">Fastest, money not important</option>
+            <option value="comfort">Least stress / fewer stops</option>
+        </select>
+
+        <textarea id="preference">I want the best value. I can take a little longer if I save good money.</textarea>
+
+        <button type="submit">Find my best flight</button>
     </form>
 </section>
 
