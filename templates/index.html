@@ -1,175 +1,126 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <title>AIFLight | AI Price Defense</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="description" content="AIFLight helps travelers compare routes, track flight prices, and decide when to buy or wait.">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/style.css">
 </head>
-
 <body>
 
 <header class="hero">
-    <div class="hero-bg">
-        <div class="sky-glow"></div>
-        <div class="flight-path"></div>
-        <div class="plane">✈</div>
-    </div>
-
-    <nav class="nav">
-        <div class="logo">
-            <span class="logo-mark">✈</span>
-            AIFLight
-        </div>
-
-        <div class="nav-pill">
-            AI vs Airline Pricing AI
-        </div>
+    <nav>
+        <div class="logo">AIFLight</div>
+        <div class="pill">AI vs Airline Pricing</div>
     </nav>
 
-    <section class="hero-content">
-        <div class="hero-badge">Smart flight timing engine</div>
-
-        <h1>Beat airline price swings before you book.</h1>
-
-        <p>
-            Search smarter, compare booking sites, avoid bad timing,
-            and know when to buy or wait.
-        </p>
-
-        <div class="smart-search">
-            <span class="smart-icon">🔎</span>
-            <input 
-                id="smartQuery"
-                placeholder="Try: New York to Cairo next month under $900"
-            >
-            <button id="smartSearchBtn" type="button">✈</button>
-        </div>
-
-        <div class="trust">
-            <span>No booking fees</span>
-            <span>Buy or wait guidance</span>
-            <span>Google • Kayak • Skyscanner</span>
-        </div>
-    </section>
+    <h1>Beat airline price swings before you book.</h1>
+    <p>A premium flight decision engine that helps you choose cheaper, faster, or more comfortable routes.</p>
 </header>
 
 <main>
-
     <section class="search-card">
-        <div class="card-header">
-            <div>
-                <p class="eyebrow">Flight search</p>
-                <h2>Start a price-defense search</h2>
-            </div>
-            <div class="ai-chip">AI scan ready</div>
-        </div>
+        <h2>Build your flight strategy</h2>
+        <p class="helper">Tap your choices. No confusing forms.</p>
 
         <form id="searchForm">
+            <div class="grid">
+                <input id="origin" value="LGA" placeholder="From: LGA or New York">
+                <input id="destination" value="BOS" placeholder="To: BOS or Boston">
+            </div>
 
-            <div class="route-grid">
-                <label class="field">
-                    <span>From</span>
-                    <input id="origin" value="JFK" placeholder="City or airport">
-                </label>
-
-                <button type="button" class="swap-btn" id="swapBtn">⇄</button>
-
-                <label class="field">
-                    <span>To</span>
-                    <input id="destination" value="Cairo" placeholder="City or airport">
-                </label>
+            <div class="choice-section">
+                <h3>Trip type</h3>
+                <div class="choice-grid two">
+                    <button type="button" class="choice active" data-group="tripType" data-value="oneway">One way</button>
+                    <button type="button" class="choice" data-group="tripType" data-value="roundtrip">Round trip</button>
+                </div>
             </div>
 
             <div class="grid">
-                <label class="field">
-                    <span>Trip type</span>
-                    <select id="tripType">
-                        <option value="oneway">One way</option>
-                        <option value="roundtrip">Round trip</option>
-                    </select>
-                </label>
-
-                <label class="field">
-                    <span>Travel style</span>
-                    <select id="priority">
-                        <option value="balanced">Best price defense</option>
-                        <option value="cheapest">Cheapest hunt</option>
-                        <option value="fastest">Fastest route</option>
-                        <option value="comfort">Low-stress family trip</option>
-                    </select>
-                </label>
-            </div>
-
-            <div class="grid">
-                <label class="field">
-                    <span>Departure date</span>
+                <label>Departure date
                     <input id="departDate" type="date">
                 </label>
-
-                <label class="field return-field" id="returnField">
-                    <span>Return date</span>
+                <label id="returnWrap">Return date
                     <input id="returnDate" type="date">
                 </label>
             </div>
 
-            <div class="passenger-card">
-                <div class="passenger-title">Passengers</div>
-
-                <label>
-                    <span>Adults</span>
-                    <input id="adults" type="number" min="1" value="1">
-                </label>
-
-                <label>
-                    <span>Children</span>
-                    <input id="children" type="number" min="0" value="0">
-                </label>
-
-                <label>
-                    <span>Infants</span>
-                    <input id="infants" type="number" min="0" value="0">
-                </label>
+            <div class="choice-section">
+                <h3>Passengers</h3>
+                <div class="passenger-grid">
+                    <div class="counter">
+                        <span>Adults</span>
+                        <div><button type="button" data-counter="adults" data-action="-">−</button><strong id="adultsValue">1</strong><button type="button" data-counter="adults" data-action="+">+</button></div>
+                    </div>
+                    <div class="counter">
+                        <span>Children</span>
+                        <div><button type="button" data-counter="children" data-action="-">−</button><strong id="childrenValue">0</strong><button type="button" data-counter="children" data-action="+">+</button></div>
+                    </div>
+                    <div class="counter">
+                        <span>Infants</span>
+                        <div><button type="button" data-counter="infants" data-action="-">−</button><strong id="infantsValue">0</strong><button type="button" data-counter="infants" data-action="+">+</button></div>
+                    </div>
+                </div>
             </div>
 
-            <label class="field">
-                <span>AI travel preference</span>
-                <textarea id="preference">I want the cheapest smart option, but I do not want a terrible layover.</textarea>
-            </label>
+            <div class="choice-section">
+                <h3>What matters most?</h3>
+                <div class="choice-grid">
+                    <button type="button" class="choice active big" data-group="priority" data-value="balanced">
+                        ⚖️ Best Value
+                        <span>Balance price, time, and stress</span>
+                    </button>
+                    <button type="button" class="choice big" data-group="priority" data-value="cheapest">
+                        💰 Cheapest
+                        <span>Find the lowest price path</span>
+                    </button>
+                    <button type="button" class="choice big" data-group="priority" data-value="fastest">
+                        ⚡ Fastest
+                        <span>Save time, even if it costs more</span>
+                    </button>
+                    <button type="button" class="choice big" data-group="priority" data-value="comfort">
+                        🛋️ Comfort
+                        <span>Fewer stops and less stress</span>
+                    </button>
+                </div>
+            </div>
 
-            <button class="main-btn" type="submit">
-                <span>Run AI Price Defense</span>
-                <b>✈</b>
-            </button>
+            <div class="choice-section">
+                <h3>Cabin</h3>
+                <div class="choice-grid two">
+                    <button type="button" class="choice active" data-group="cabin" data-value="economy">Economy</button>
+                    <button type="button" class="choice" data-group="cabin" data-value="premium">Premium Economy</button>
+                    <button type="button" class="choice" data-group="cabin" data-value="business">Business</button>
+                    <button type="button" class="choice" data-group="cabin" data-value="first">First</button>
+                </div>
+            </div>
 
+            <div class="choice-section">
+                <h3>Seat preference</h3>
+                <div class="choice-grid two">
+                    <button type="button" class="choice active" data-group="seat" data-value="none">No preference</button>
+                    <button type="button" class="choice" data-group="seat" data-value="window">Window</button>
+                    <button type="button" class="choice" data-group="seat" data-value="aisle">Aisle</button>
+                </div>
+                <p class="small-note">Seat availability is confirmed on the booking site.</p>
+            </div>
+
+            <textarea id="preference">I want the cheapest smart option, but I do not want a terrible layover.</textarea>
+
+            <input type="hidden" id="tripType" value="oneway">
+            <input type="hidden" id="priority" value="balanced">
+            <input type="hidden" id="cabin" value="economy">
+            <input type="hidden" id="seat" value="none">
+
+            <button class="submit-btn" type="submit">Run Price Defense</button>
         </form>
     </section>
 
-    <section id="status" class="status-panel"></section>
-
-    <section id="strategy" class="strategy-panel"></section>
-
-    <section class="deal-tabs">
-        <button class="active">
-            <span>AI Pick</span>
-            <strong id="bestPrice">$---</strong>
-        </button>
-        <button>
-            <span>Cheapest</span>
-            <strong id="cheapPrice">$---</strong>
-        </button>
-        <button>
-            <span>Fastest</span>
-            <strong id="fastPrice">$---</strong>
-        </button>
-    </section>
-
+    <section id="status"></section>
+    <section id="strategy"></section>
     <section id="results" class="results"></section>
-
 </main>
 
 <script src="/static/script.js"></script>
-
 </body>
 </html>
