@@ -1,230 +1,125 @@
 import os
+import requests
 from flask import Flask, render_template, request, jsonify
-from openai import OpenAI
+import openai
 
 app = Flask(__name__)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+# ✅ Load API key from Render (NOT hardcoded)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai.api_key = OPENAI_API_KEY
+
 
 @app.route("/")
 def home():
     return render_template("index.html")
 
 
-def build_booking_links(origin, destination, trip_type, depart_date, return_date, adults, children, infants):
-    google = (
-        f"https://www.google.com/travel/flights?q=flights%20from%20{origin}%20to%20{destination}"
-        f"%20on%20{depart_date}"
-    )
+# ✅ Build booking links (Google Flights + Kayak)
+def build_booking_links(origin, destination, trip_type, depart_date, return_date, adults):
 
-    kayak = (
-        f"https://www.kayak.com/flights/{origin}-{destination}/{depart_date}"
-    )
+    # Google Flights
+    google = f"https://www.google.com/travel/flights?q=flights%20from%20{origin}%20to%20{destination}%20on%20{depart_date}"
 
-    skyscanner = (
-        f"https://www.skyscanner.com/transport/flights/{origin.lower()}/{destination.lower()}/{depart_date.replace('-', '')}/"
-    )
+    if trip_type == "round" and return_date:
+        google += f"%20return%20{destination}%20to%20{origin}%20on%20{return_date}"
 
-    expedia = (
-        f"https://www.expedia.com/Flights-Search?trip={trip_type}"
-        f"&leg1=from:{origin},to:{destination},departure:{depart_date}TANYT"
-        f"&passengers=adults:{adults},children:{children},infantinlap:{infants}"
-        f"&options=cabinclass:economy&mode=search"
-    )
+    # Kayak
+    kayak = f"https://www.kayak.com/flights/{origin}-{destination}/{depart_date}"
 
-    if trip_type == "roundtrip" and return_date:
-        google += f"%20return%20{return_date}"
-        kayak = f"https://www.kayak.com/flights/{origin}-{destination}/{depart_date}/{return_date}"
-        skyscanner = (
-            f"https://www.skyscanner.com/transport/flights/{origin.lower()}/{destination.lower()}/"
-            f"{depart_date.replace('-', '')}/{return_date.replace('-', '')}/"
-        )
-        expedia = (
-            f"https://www.expedia.com/Flights-Search?trip=roundtrip"
-            f"&leg1=from:{origin},to:{destination},departure:{depart_date}TANYT"
-            f"&leg2=from:{destination},to:{origin},departure:{return_date}TANYT"
-            f"&passengers=adults:{adults},children:{children},infantinlap:{infants}"
-            f"&options=cabinclass:economy&mode=search"
-        )
+    if trip_type == "round" and return_date:
+        kayak += f"/{return_date}"
 
     return {
         "google": google,
-        "kayak": kayak,
-        "skyscanner": skyscanner,
-        "expedia": expedia
+        "kayak": kayak
     }
 
 
-def generate_smart_options(priority):
-    options = [
+# ✅ Fake real-like flight generator (until API connected)
+def generate_flights(origin, destination):
+    return [
         {
-            "title": "Best Value",
-            "badge": "Recommended for you",
-            "airline": "Smart Pick",
-            "price": 650,
-            "duration": "6h 30m",
-            "hours": 6.5,
+            "airline": "Delta Airlines",
+            "price": 420,
+            "duration": "6h 20m",
             "stops": 0,
-            "stress": "Low",
-            "type": "best"
+            "tag": "Fastest Option"
         },
         {
-            "title": "Cheapest Option",
-            "badge": "Save the most",
-            "airline": "Budget Route",
-            "price": 550,
-            "duration": "8h 20m",
-            "hours": 8.3,
+            "airline": "United Airlines",
+            "price": 350,
+            "duration": "8h 10m",
             "stops": 1,
-            "stress": "Medium",
-            "type": "cheap"
+            "tag": "Best Value"
         },
         {
-            "title": "Fastest Option",
-            "badge": "Fastest arrival",
-            "airline": "Direct Route",
-            "price": 890,
-            "duration": "5h 45m",
-            "hours": 5.75,
-            "stops": 0,
-            "stress": "Low",
-            "type": "fast"
-        },
-        {
-            "title": "Least Stress",
-            "badge": "Comfort pick",
-            "airline": "Comfort Route",
-            "price": 720,
-            "duration": "6h 10m",
-            "hours": 6.15,
-            "stops": 0,
-            "stress": "Very Low",
-            "type": "comfort"
+            "airline": "JetBlue",
+            "price": 290,
+            "duration": "9h 30m",
+            "stops": 1,
+            "tag": "Cheapest Option"
         }
     ]
 
-    if priority == "cheapest":
-        return sorted(options, key=lambda x: x["price"])
-    if priority == "fastest":
-        return sorted(options, key=lambda x: x["hours"])
-    if priority == "comfort":
-        return sorted(options, key=lambda x: (x["stops"], x["hours"]))
-    return options
 
+@app.route("/search", methods=["POST"])
+def search():
 
-def fallback_advice(option, options):
-    cheapest = min(options, key=lambda x: x["price"])
-    fastest = min(options, key=lambda x: x["hours"])
+    data = request.json
 
-    if option["type"] == "cheap":
-        extra_time = round(option["hours"] - fastest["hours"], 1)
-        savings = fastest["price"] - option["price"]
-        return f"You save about ${savings} by choosing this option, but your trip is about {extra_time} hours longer. This is best if price matters more than speed."
+    origin = data.get("origin")
+    destination = data.get("destination")
+    depart_date = data.get("depart_date")
+    return_date = data.get("return_date")
+    trip_type = data.get("trip_type")  # one-way or round
 
-    if option["type"] == "fast":
-        extra_cost = option["price"] - cheapest["price"]
-        time_saved = round(cheapest["hours"] - option["hours"], 1)
-        return f"You pay about ${extra_cost} more, but you save around {time_saved} hours and avoid extra travel stress. Best if time matters most."
+    adults = int(data.get("adults", 1))
+    kids = int(data.get("kids", 0))
+    infants = int(data.get("infants", 0))
 
-    if option["type"] == "comfort":
-        return "This option is designed to reduce travel stress. It avoids extra stops and keeps the schedule smoother."
+    # ✅ Generate flights (replace later with real API)
+    flights = generate_flights(origin, destination)
 
-    return "This is the best balance between price, time, and comfort. It helps you avoid overpaying while still keeping the trip smooth."
+    # ✅ Build booking links
+    links = build_booking_links(origin, destination, trip_type, depart_date, return_date, adults)
 
+    # ✅ AI explanation (SAFE)
+    ai_text = "AI unavailable"
 
-def ai_advice(option, options, data):
-    if not client:
-        return fallback_advice(option, options)
-
-    prompt = f"""
-You are AIFLight, a premium AI travel advisor.
-
+    if OPENAI_API_KEY:
+        try:
+            prompt = f"""
 User trip:
-From: {data["origin"]}
-To: {data["destination"]}
-Trip type: {data["trip_type"]}
-Departure: {data["depart_date"]}
-Return: {data["return_date"]}
-Adults: {data["adults"]}
-Children: {data["children"]}
-Infants: {data["infants"]}
-Preference: {data["preference"]}
+From {origin} to {destination}
+Depart: {depart_date}
+Return: {return_date}
+Passengers: {adults} adults, {kids} kids, {infants} infants
 
-Option:
-{option}
+Flights:
+{flights}
 
-All options:
-{options}
-
-Write a short, confident explanation.
-Focus on what the traveler gains and what they trade off.
-Mention savings, time saved, stress, stops, and confidence.
-Do not say this is fake or demo.
-Do not sound robotic.
+Explain:
+- Best option
+- Trade-offs
+- Which one reduces stress
 """
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a premium travel decision assistant."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=110,
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
-    except Exception:
-        return fallback_advice(option, options)
+            response = openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}]
+            )
 
+            ai_text = response.choices[0].message.content
 
-@app.route("/api/search", methods=["POST"])
-def search():
-    data = request.get_json(force=True)
-
-    trip_data = {
-        "origin": data.get("origin", "JFK").upper().strip(),
-        "destination": data.get("destination", "LAX").upper().strip(),
-        "trip_type": data.get("tripType", "oneway"),
-        "depart_date": data.get("departDate", ""),
-        "return_date": data.get("returnDate", ""),
-        "adults": int(data.get("adults", 1)),
-        "children": int(data.get("children", 0)),
-        "infants": int(data.get("infants", 0)),
-        "priority": data.get("priority", "balanced"),
-        "preference": data.get("preference", "")
-    }
-
-    options = generate_smart_options(trip_data["priority"])
-
-    links = build_booking_links(
-        trip_data["origin"],
-        trip_data["destination"],
-        trip_data["trip_type"],
-        trip_data["depart_date"],
-        trip_data["return_date"],
-        trip_data["adults"],
-        trip_data["children"],
-        trip_data["infants"]
-    )
-
-    results = []
-    for option in options:
-        option["advice"] = ai_advice(option, options, trip_data)
-        option["links"] = links
-        results.append(option)
+        except Exception as e:
+            ai_text = f"AI error: {str(e)}"
 
     return jsonify({
-        "ai_enabled": bool(client),
-        "trip": trip_data,
-        "results": results
+        "flights": flights,
+        "ai": ai_text,
+        "links": links
     })
-
-
-@app.route("/api/health")
-def health():
-    return jsonify({"status": "ok", "ai_enabled": bool(client)})
 
 
 if __name__ == "__main__":
