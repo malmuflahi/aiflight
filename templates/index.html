@@ -1,79 +1,175 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>AIFLight | AI Price Defense</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="description" content="AIFLight helps travelers compare routes, track flight prices, and decide when to buy or wait.">
     <link rel="stylesheet" href="/static/style.css">
 </head>
+
 <body>
 
 <header class="hero">
-    <nav>
-        <div class="logo">AIFLight</div>
-        <div class="pill">AI vs Airline Pricing AI</div>
+    <div class="hero-bg">
+        <div class="sky-glow"></div>
+        <div class="flight-path"></div>
+        <div class="plane">✈</div>
+    </div>
+
+    <nav class="nav">
+        <div class="logo">
+            <span class="logo-mark">✈</span>
+            AIFLight
+        </div>
+
+        <div class="nav-pill">
+            AI vs Airline Pricing AI
+        </div>
     </nav>
 
-    <h1>Beat airline price swings before you book.</h1>
-    <p>
-        AIFLight helps you track the right route, compare booking sites, avoid bad timing,
-        and decide when to buy or wait.
-    </p>
+    <section class="hero-content">
+        <div class="hero-badge">Smart flight timing engine</div>
 
-    <div class="trust">
-        <span>No booking fees</span>
-        <span>Compare before buying</span>
-        <span>Google • Kayak • Skyscanner</span>
-    </div>
+        <h1>Beat airline price swings before you book.</h1>
+
+        <p>
+            Search smarter, compare booking sites, avoid bad timing,
+            and know when to buy or wait.
+        </p>
+
+        <div class="smart-search">
+            <span class="smart-icon">🔎</span>
+            <input 
+                id="smartQuery"
+                placeholder="Try: New York to Cairo next month under $900"
+            >
+            <button id="smartSearchBtn" type="button">✈</button>
+        </div>
+
+        <div class="trust">
+            <span>No booking fees</span>
+            <span>Buy or wait guidance</span>
+            <span>Google • Kayak • Skyscanner</span>
+        </div>
+    </section>
 </header>
 
 <main>
+
     <section class="search-card">
-        <h2>Start a price-defense search</h2>
+        <div class="card-header">
+            <div>
+                <p class="eyebrow">Flight search</p>
+                <h2>Start a price-defense search</h2>
+            </div>
+            <div class="ai-chip">AI scan ready</div>
+        </div>
 
         <form id="searchForm">
-            <div class="grid">
-                <input id="origin" value="JFK" placeholder="From: JFK or New York">
-                <input id="destination" value="Cairo" placeholder="To: Cairo, Egypt, DXB">
+
+            <div class="route-grid">
+                <label class="field">
+                    <span>From</span>
+                    <input id="origin" value="JFK" placeholder="City or airport">
+                </label>
+
+                <button type="button" class="swap-btn" id="swapBtn">⇄</button>
+
+                <label class="field">
+                    <span>To</span>
+                    <input id="destination" value="Cairo" placeholder="City or airport">
+                </label>
             </div>
 
-            <select id="tripType">
-                <option value="oneway">One way</option>
-                <option value="roundtrip">Round trip</option>
-            </select>
+            <div class="grid">
+                <label class="field">
+                    <span>Trip type</span>
+                    <select id="tripType">
+                        <option value="oneway">One way</option>
+                        <option value="roundtrip">Round trip</option>
+                    </select>
+                </label>
+
+                <label class="field">
+                    <span>Travel style</span>
+                    <select id="priority">
+                        <option value="balanced">Best price defense</option>
+                        <option value="cheapest">Cheapest hunt</option>
+                        <option value="fastest">Fastest route</option>
+                        <option value="comfort">Low-stress family trip</option>
+                    </select>
+                </label>
+            </div>
 
             <div class="grid">
-                <label>Departure date
+                <label class="field">
+                    <span>Departure date</span>
                     <input id="departDate" type="date">
                 </label>
-                <label>Return date
+
+                <label class="field return-field" id="returnField">
+                    <span>Return date</span>
                     <input id="returnDate" type="date">
                 </label>
             </div>
 
-            <div class="passengers">
-                <label>Adults <input id="adults" type="number" min="1" value="1"></label>
-                <label>Children <input id="children" type="number" min="0" value="0"></label>
-                <label>Infants <input id="infants" type="number" min="0" value="0"></label>
+            <div class="passenger-card">
+                <div class="passenger-title">Passengers</div>
+
+                <label>
+                    <span>Adults</span>
+                    <input id="adults" type="number" min="1" value="1">
+                </label>
+
+                <label>
+                    <span>Children</span>
+                    <input id="children" type="number" min="0" value="0">
+                </label>
+
+                <label>
+                    <span>Infants</span>
+                    <input id="infants" type="number" min="0" value="0">
+                </label>
             </div>
 
-            <select id="priority">
-                <option value="balanced">Best price defense</option>
-                <option value="cheapest">Cheapest hunt</option>
-                <option value="fastest">Fastest route</option>
-                <option value="comfort">Low-stress family trip</option>
-            </select>
+            <label class="field">
+                <span>AI travel preference</span>
+                <textarea id="preference">I want the cheapest smart option, but I do not want a terrible layover.</textarea>
+            </label>
 
-            <textarea id="preference">I want the cheapest smart option, but I do not want a terrible layover.</textarea>
+            <button class="main-btn" type="submit">
+                <span>Run AI Price Defense</span>
+                <b>✈</b>
+            </button>
 
-            <button type="submit">Run AI Price Defense</button>
         </form>
     </section>
 
-    <section id="status"></section>
-    <section id="strategy"></section>
+    <section id="status" class="status-panel"></section>
+
+    <section id="strategy" class="strategy-panel"></section>
+
+    <section class="deal-tabs">
+        <button class="active">
+            <span>AI Pick</span>
+            <strong id="bestPrice">$---</strong>
+        </button>
+        <button>
+            <span>Cheapest</span>
+            <strong id="cheapPrice">$---</strong>
+        </button>
+        <button>
+            <span>Fastest</span>
+            <strong id="fastPrice">$---</strong>
+        </button>
+    </section>
+
     <section id="results" class="results"></section>
+
 </main>
 
 <script src="/static/script.js"></script>
+
 </body>
 </html>
