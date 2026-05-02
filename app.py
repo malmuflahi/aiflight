@@ -67,6 +67,16 @@ NEARBY_AIRPORTS = {
     "HOU": ["HOU", "IAH"]
 }
 
+DAY_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7
+}
+
 def normalize_airport(value):
     value = (value or "").strip()
     if not value:
@@ -74,8 +84,11 @@ def normalize_airport(value):
 
     key = re.sub(r"[^a-z0-9 ]+", " ", value.lower())
     key = re.sub(r"\s+", " ", key).strip()
-    key = re.sub(r"^(?:go|going|fly|flying|travel|traveling|visit|visiting)\s+(?:to\s+)?", "", key).strip()
-    key = re.sub(r"^(?:to|for)\s+", "", key).strip()
+    previous_key = None
+    while key and key != previous_key:
+        previous_key = key
+        key = re.sub(r"^(?:to|for)\s+", "", key).strip()
+        key = re.sub(r"^(?:go|going|fly|flying|travel|traveling|visit|visiting)\s+(?:to\s+)?", "", key).strip()
     if key in AIRPORT_MAP:
         return AIRPORT_MAP[key]
 
@@ -335,14 +348,34 @@ def detect_world_cup_texas_request(text):
         return False
     return any(word in lower for word in ("first", "earliest", "only one", "one match", "1 match"))
 
+def parse_day_offset(value, default=1):
+    value = str(value or "").lower().strip()
+    if value in DAY_WORDS:
+        return DAY_WORDS[value]
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
 def resolve_world_cup_texas_trip(text):
     if not detect_world_cup_texas_request(text):
         return {}
 
     lower = (text or "").lower()
     match_date = datetime.strptime(WORLD_CUP_TEXAS_FIRST_MATCH["date"], "%Y-%m-%d").date()
-    depart_date = (match_date - timedelta(days=1)).strftime("%Y-%m-%d")
-    return_date = (match_date + timedelta(days=1)).strftime("%Y-%m-%d")
+    depart_offset = 1
+    return_offset = 1
+
+    arrive_match = re.search(r"\b(?:arrive|get there|land)\s+(?:the\s+)?(one|two|three|four|five|six|seven|\d+)\s+days?\s+before", lower)
+    if arrive_match:
+        depart_offset = max(0, min(7, parse_day_offset(arrive_match.group(1), 1)))
+
+    return_match = re.search(r"\b(?:come back|return|fly back|back)\s+(?:after\s+)?(one|two|three|four|five|six|seven|\d+)\s+days?\s*(?:after|later)?", lower)
+    if return_match:
+        return_offset = max(0, min(14, parse_day_offset(return_match.group(1), 1)))
+
+    depart_date = (match_date - timedelta(days=depart_offset)).strftime("%Y-%m-%d")
+    return_date = (match_date + timedelta(days=return_offset)).strftime("%Y-%m-%d")
 
     updates = {
         "destination": WORLD_CUP_TEXAS_FIRST_MATCH["airport"],
@@ -388,7 +421,13 @@ def rule_extract_trip_details(message):
             updates["destination"] = normalize_airport(route_match.group(2))
     else:
         to_match = re.search(rf"\b(?:to|for)\s+([a-zA-Z .]+?){route_stop}", lower)
-        if to_match and not is_place_pronoun(to_match.group(1)) and not is_non_place_phrase(to_match.group(1)):
+        if (
+            to_match
+            and "destination" not in updates
+            and " from " not in f" {to_match.group(1)} "
+            and not is_place_pronoun(to_match.group(1))
+            and not is_non_place_phrase(to_match.group(1))
+        ):
             updates["destination"] = normalize_airport(to_match.group(1))
 
         from_match = re.search(rf"\bfrom\s+([a-zA-Z .]+?){route_stop}", lower)
@@ -592,7 +631,7 @@ def followup_reply(trip, missing):
     else:
         needed = ", ".join(missing[:-1]) + f", and {missing[-1]}"
 
-    return f"I noted {summary}. I still need {needed}. Send that and I will pull live prices."
+    return f"I can work with that. So far I have {summary}. I only need {needed} to search live prices."
 
 def ai_followup_reply(message, trip, missing, history):
     fallback = followup_reply(trip, missing)
@@ -715,14 +754,20 @@ def ai_chat_reply(message, trip, offers, cards, links, reason, plan, strategy, h
         print("AI chat reply fallback:", str(exc), flush=True)
         return fallback
 
+def local_agent_brain(message, current_trip):
+    trip = merge_trip_updates(current_trip, rule_extract_trip_details(message))
+    missing = missing_chat_fields(trip)
+
+    return {
+        "reply": "" if not missing else followup_reply(trip, missing),
+        "trip": trip,
+        "ready_to_search": not missing,
+        "missing_fields": missing
+    }
+
 def ai_agent_brain(message, current_trip, history):
     if not client:
-        return {
-            "reply": "AIFlight's AI engine is not connected right now. Add OPENAI_API_KEY on Render so I can reason through the trip like an agent.",
-            "trip": current_trip,
-            "ready_to_search": False,
-            "missing_fields": ["AI engine connection"]
-        }
+        return local_agent_brain(message, current_trip)
 
     system_prompt = (
         "You are AIFlight, an AI travel agent built to beat airline pricing AI for clients. "
@@ -766,12 +811,7 @@ def ai_agent_brain(message, current_trip, history):
         brain = json.loads(response.choices[0].message.content)
     except Exception as exc:
         print("AI agent brain fallback:", str(exc), flush=True)
-        return {
-            "reply": "I had trouble thinking through that request. Try saying the route, date, and passengers in one sentence.",
-            "trip": current_trip,
-            "ready_to_search": False,
-            "missing_fields": ["AI response"]
-        }
+        return local_agent_brain(message, current_trip)
 
     return {
         "reply": str(brain.get("reply") or "").strip(),
