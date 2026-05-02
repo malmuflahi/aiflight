@@ -189,6 +189,15 @@ def parse_chat_date(text):
     if valid_iso:
         return valid_iso
 
+    slash_dates = []
+    for month, day, year in re.findall(r"\b(\d{1,2})/(\d{1,2})/(20\d{2})\b", text):
+        try:
+            slash_dates.append(datetime(int(year), int(month), int(day)).date().strftime("%Y-%m-%d"))
+        except ValueError:
+            continue
+    if slash_dates:
+        return slash_dates
+
     if "tomorrow" in text:
         return [(today + timedelta(days=1)).strftime("%Y-%m-%d")]
 
@@ -230,6 +239,57 @@ def parse_chat_date(text):
             found.append(candidate.strftime("%Y-%m-%d"))
 
     return found
+
+def parse_flexible_date_range(text):
+    text = (text or "").lower()
+    today = datetime.now().date()
+    months = {
+        "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+        "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+        "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+        "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12
+    }
+    month_pattern = "|".join(months)
+    match = re.search(rf"\b({month_pattern})\b(?:\s+any)?\s+(\d{{1,2}})\s*(?:-|to)\s*(\d{{1,2}})(?:,?\s*(20\d{{2}}))?", text)
+    if not match:
+        return {}
+
+    month = months[match.group(1)]
+    start_day = int(match.group(2))
+    end_day = int(match.group(3))
+    year = int(match.group(4)) if match.group(4) else today.year
+
+    try:
+        start = datetime(year, month, start_day).date()
+        end = datetime(year, month, end_day).date()
+    except ValueError:
+        return {}
+
+    if start < today:
+        try:
+            start = datetime(year + 1, month, start_day).date()
+            end = datetime(year + 1, month, end_day).date()
+        except ValueError:
+            return {}
+
+    duration_match = re.search(r"\b(\d+)\s*(?:day|days|night|nights)\b", text)
+    if duration_match:
+        stay_days = int(duration_match.group(1))
+    elif "one week" in text or "1 week" in text or "week vacation" in text or "week vecation" in text:
+        stay_days = 7
+    else:
+        stay_days = max(1, min(7, (end - start).days))
+
+    return_date = start + timedelta(days=stay_days)
+    if return_date > end and "week" not in text:
+        return_date = end
+
+    return {
+        "depart_date": start.strftime("%Y-%m-%d"),
+        "return_date": return_date.strftime("%Y-%m-%d"),
+        "trip_type": "roundtrip",
+        "date_window": f"{start.strftime('%b')} {start.day}-{end.day} flexible"
+    }
 
 def detect_date_window(text):
     text = (text or "").lower()
@@ -299,18 +359,35 @@ def rule_extract_trip_details(message):
         if from_match:
             updates["origin"] = normalize_airport(from_match.group(1))
 
-    if "round trip" in lower or "roundtrip" in lower or "coming back" in lower or "return" in lower:
+    origin_followup = re.search(r"\b(?:depart|departure|leaving|leave|start)\s+(?:from\s+)?([a-zA-Z .]+?)(?:[.,]|$)", lower)
+    if origin_followup:
+        updates["origin"] = normalize_airport(origin_followup.group(1))
+
+    city_definition = re.search(r"\b(nyc|new york|jfk|lga|ewr)\s+(?:is|means)\s+(?:new york|nyc)\b", lower)
+    if city_definition:
+        updates["origin"] = normalize_airport(city_definition.group(1))
+
+    bare_origin = re.fullmatch(r"\s*(nyc|new york|jfk|lga|ewr)\s*", lower)
+    if bare_origin:
+        updates["origin"] = normalize_airport(bare_origin.group(1))
+
+    if "round trip" in lower or "roundtrip" in lower or "coming back" in lower or "return" in lower or "vacation" in lower or "vecation" in lower:
         updates["trip_type"] = "roundtrip"
     elif "one way" in lower or "one-way" in lower or "single" in lower:
         updates["trip_type"] = "oneway"
 
-    dates = parse_chat_date(lower)
-    if dates:
-        updates["depart_date"] = dates[0]
-        if len(dates) > 1:
-            updates["return_date"] = dates[1]
-            updates["trip_type"] = "roundtrip"
+    flexible_dates = parse_flexible_date_range(lower)
+    if flexible_dates:
+        updates.update(flexible_dates)
     else:
+        dates = parse_chat_date(lower)
+        if dates:
+            updates["depart_date"] = dates[0]
+            if len(dates) > 1:
+                updates["return_date"] = dates[1]
+                updates["trip_type"] = "roundtrip"
+
+    if not updates.get("depart_date"):
         window = detect_date_window(lower)
         if window:
             updates["date_window"] = window
@@ -320,7 +397,7 @@ def rule_extract_trip_details(message):
     infant_match = re.search(r"\b(\d+)\s+(?:infant|infants|baby|babies)\b", lower)
     if adult_match:
         updates["adults"] = int(adult_match.group(1))
-    elif "solo" in lower or "alone" in lower or "just me" in lower:
+    elif "solo" in lower or "alone" in lower or "just me" in lower or re.search(r"\bi\s+(?:want|need|am|will)\b", lower):
         updates["adults"] = 1
     if child_match:
         updates["children"] = int(child_match.group(1))
@@ -434,8 +511,6 @@ def missing_chat_fields(trip):
         missing.append("return date")
     if not trip.get("adults"):
         missing.append("number of adults")
-    if not trip.get("cabin"):
-        missing.append("cabin")
     return missing
 
 def summarize_chat_trip(trip):
@@ -455,8 +530,7 @@ def summarize_chat_trip(trip):
         parts.append("round trip" if trip["trip_type"] == "roundtrip" else "one way")
     if trip.get("adults"):
         parts.append(f"{trip['adults']} adult(s)")
-    if trip.get("cabin"):
-        parts.append(f"{trip['cabin']} cabin")
+    parts.append(f"{trip.get('cabin') or 'economy'} cabin")
     if trip.get("priority"):
         parts.append(f"{trip['priority']} priority")
     return ", ".join(parts) if parts else "your trip notes"
@@ -533,7 +607,7 @@ def prepare_chat_search_trip(trip):
         "children": parse_passenger_count(trip.get("children"), default=0),
         "infants": parse_passenger_count(trip.get("infants"), default=0),
         "priority": priority,
-        "cabin": trip["cabin"],
+        "cabin": trip.get("cabin") or "economy",
         "seat": trip.get("seat") or "none",
         "preference": trip.get("preference", ""),
         "event_context": trip.get("event_context", {})

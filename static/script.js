@@ -65,7 +65,7 @@ function renderNotes(trip = {}) {
     const tripType = trip.trip_type === "roundtrip" ? "Round trip" : trip.trip_type === "oneway" ? "One way" : "";
     const returnDate = trip.trip_type === "roundtrip" ? trip.return_date : "Not needed";
     const priority = trip.priority ? trip.priority.replace("_", " ") : "";
-    const cabin = trip.cabin ? trip.cabin.replace("_", " ") : "";
+    const cabin = trip.cabin ? trip.cabin.replace("_", " ") : "Economy default";
 
     notesList.innerHTML = [
         labelValue("Event", event.match ? `${event.match}, ${event.date}` : "None"),
