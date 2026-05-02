@@ -29,16 +29,29 @@ AIRPORT_MAP = {
     "lga": "LGA", "jfk": "JFK", "ewr": "EWR",
     "boston": "BOS", "bos": "BOS",
     "london": "LHR", "londen": "LHR", "lhr": "LHR", "heathrow": "LHR",
+    "houston": "IAH", "iah": "IAH", "hou": "HOU",
+    "dallas": "DFW", "arlington": "DFW", "dfw": "DFW",
     "dubai": "DXB", "los angeles": "LAX", "la": "LAX",
     "san francisco": "SFO", "sfo": "SFO",
     "chicago": "ORD", "ord": "ORD",
     "miami": "MIA", "mia": "MIA",
     "atlanta": "ATL", "atl": "ATL",
-    "dallas": "DFW", "dfw": "DFW",
     "paris": "CDG", "cdg": "CDG",
     "rome": "FCO", "fco": "FCO",
     "tokyo": "HND", "hnd": "HND",
     "toronto": "YYZ", "yyz": "YYZ"
+}
+
+WORLD_CUP_TEXAS_FIRST_MATCH = {
+    "name": "First Texas FIFA World Cup 2026 match",
+    "match": "Germany vs Curacao",
+    "date": "2026-06-14",
+    "venue": "NRG Stadium",
+    "fifa_venue": "Houston Stadium",
+    "city": "Houston",
+    "state": "Texas",
+    "airport": "IAH",
+    "source": "FIFA and NRG Park schedule"
 }
 
 def normalize_airport(value):
@@ -92,7 +105,8 @@ def blank_chat_trip():
         "priority": "",
         "cabin": "",
         "seat": "none",
-        "preference": ""
+        "preference": "",
+        "event_context": {}
     }
 
 def coerce_chat_trip(value):
@@ -115,6 +129,7 @@ def coerce_chat_trip(value):
     trip["seat"] = normalize_seat(trip.get("seat", "none")) or "none"
     trip["preference"] = str(trip.get("preference") or "").strip()
     trip["date_window"] = str(trip.get("date_window") or "").strip()
+    trip["event_context"] = trip.get("event_context") if isinstance(trip.get("event_context"), dict) else {}
     return trip
 
 def coerce_optional_count(value, default=None, minimum=0):
@@ -225,21 +240,61 @@ def detect_date_window(text):
         return "this month"
     return ""
 
+def is_place_pronoun(value):
+    value = re.sub(r"[^a-z]+", "", (value or "").lower())
+    return value in ("there", "their", "thier", "thatplace")
+
+def detect_world_cup_texas_request(text):
+    lower = (text or "").lower()
+    if "world cup" not in lower or "texas" not in lower:
+        return False
+    return any(word in lower for word in ("first", "earliest", "only one", "one match", "1 match"))
+
+def resolve_world_cup_texas_trip(text):
+    if not detect_world_cup_texas_request(text):
+        return {}
+
+    lower = (text or "").lower()
+    match_date = datetime.strptime(WORLD_CUP_TEXAS_FIRST_MATCH["date"], "%Y-%m-%d").date()
+    depart_date = (match_date - timedelta(days=1)).strftime("%Y-%m-%d")
+    return_date = (match_date + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    updates = {
+        "destination": WORLD_CUP_TEXAS_FIRST_MATCH["airport"],
+        "depart_date": depart_date,
+        "return_date": return_date,
+        "trip_type": "roundtrip",
+        "priority": "balanced",
+        "cabin": "economy",
+        "event_context": WORLD_CUP_TEXAS_FIRST_MATCH,
+        "preference": text
+    }
+
+    if any(term in lower for term in ("nyc", "new york", "jfk", "lga", "ewr")):
+        updates["origin"] = "JFK"
+
+    if any(term in lower for term in ("book me", "for me", " i ", "i need", "my flight", "me flight")):
+        updates["adults"] = 1
+
+    return updates
+
 def rule_extract_trip_details(message):
     text = (message or "").strip()
     lower = text.lower()
     updates = {}
 
-    route_match = re.search(r"\bfrom\s+([a-zA-Z .]+?)\s+(?:to|for)\s+([a-zA-Z .]+?)(?:[.,]|$|\s+on|\s+next|\s+in|\s+with)", lower)
+    route_stop = r"(?:[.,]|$|\s+on|\s+next|\s+in|\s+with|\s+and|\s+come\s+back|\s+return)"
+    route_match = re.search(rf"\bfrom\s+([a-zA-Z .]+?)\s+(?:to|for)\s+([a-zA-Z .]+?){route_stop}", lower)
     if route_match:
         updates["origin"] = normalize_airport(route_match.group(1))
-        updates["destination"] = normalize_airport(route_match.group(2))
+        if not is_place_pronoun(route_match.group(2)):
+            updates["destination"] = normalize_airport(route_match.group(2))
     else:
-        to_match = re.search(r"\b(?:to|for)\s+([a-zA-Z .]+?)(?:[.,]|$|\s+on|\s+next|\s+in|\s+with)", lower)
-        if to_match:
+        to_match = re.search(rf"\b(?:to|for)\s+([a-zA-Z .]+?){route_stop}", lower)
+        if to_match and not is_place_pronoun(to_match.group(1)):
             updates["destination"] = normalize_airport(to_match.group(1))
 
-        from_match = re.search(r"\bfrom\s+([a-zA-Z .]+?)(?:[.,]|$|\s+on|\s+next|\s+in|\s+with)", lower)
+        from_match = re.search(rf"\bfrom\s+([a-zA-Z .]+?){route_stop}", lower)
         if from_match:
             updates["origin"] = normalize_airport(from_match.group(1))
 
@@ -273,7 +328,7 @@ def rule_extract_trip_details(message):
 
     if "business" in lower:
         updates["cabin"] = "business"
-    elif "first class" in lower or "first" in lower:
+    elif "first class" in lower or "first-class" in lower:
         updates["cabin"] = "first"
     elif "premium" in lower:
         updates["cabin"] = "premium"
@@ -296,6 +351,10 @@ def rule_extract_trip_details(message):
 
     if text:
         updates["preference"] = text
+
+    event_updates = resolve_world_cup_texas_trip(text)
+    if event_updates:
+        updates.update(event_updates)
 
     return updates
 
@@ -380,6 +439,9 @@ def missing_chat_fields(trip):
 
 def summarize_chat_trip(trip):
     parts = []
+    event_text = event_context_summary(trip)
+    if event_text:
+        parts.append(event_text)
     if trip.get("origin") and trip.get("destination"):
         parts.append(f"{trip['origin']} to {trip['destination']}")
     elif trip.get("destination"):
@@ -397,6 +459,16 @@ def summarize_chat_trip(trip):
     if trip.get("priority"):
         parts.append(f"{trip['priority']} priority")
     return ", ".join(parts) if parts else "your trip notes"
+
+def event_context_summary(trip):
+    event = trip.get("event_context") or {}
+    if not event:
+        return ""
+
+    return (
+        f"{event.get('name', 'Event')}: {event.get('match')} at "
+        f"{event.get('venue')} in {event.get('city')} on {event.get('date')}"
+    )
 
 def followup_reply(trip, missing):
     summary = summarize_chat_trip(trip)
@@ -424,8 +496,19 @@ def prepare_chat_search_trip(trip):
         "priority": priority,
         "cabin": trip["cabin"],
         "seat": trip.get("seat") or "none",
-        "preference": trip.get("preference", "")
+        "preference": trip.get("preference", ""),
+        "event_context": trip.get("event_context", {})
     }
+
+def trip_plan_line(trip):
+    if not trip.get("event_context"):
+        return ""
+
+    return (
+        f"{event_context_summary(trip)}. I mapped the flight to "
+        f"{trip.get('destination')} and planned {trip.get('origin')} -> {trip.get('destination')} "
+        f"from {trip.get('depart_date')} to {trip.get('return_date')}."
+    )
 
 @app.route("/")
 def home():
@@ -827,6 +910,8 @@ def chat():
     rule_updates = rule_extract_trip_details(message)
     ai_updates = ai_extract_trip_details(message, current_trip, history)
     updates = {**rule_updates, **{key: value for key, value in ai_updates.items() if value not in ("", None)}}
+    if rule_updates.get("event_context"):
+        updates.update(rule_updates)
     trip = merge_trip_updates(current_trip, updates)
 
     missing = missing_chat_fields(trip)
@@ -856,10 +941,11 @@ def chat():
         cards = fallback_cards(search_trip, links, reason)
 
     strategy = ai_strategy(search_trip, offers, reason)
+    plan = trip_plan_line(search_trip)
     if offers:
-        reply = f"I found live prices and picked the strongest option: {cards[0]['signal']}. {strategy}"
+        reply = f"{plan} I found live prices and picked the strongest option: {cards[0]['signal']}. {strategy}".strip()
     else:
-        reply = strategy
+        reply = f"{plan} {strategy}".strip()
 
     return jsonify({
         "complete": True,

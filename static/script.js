@@ -59,6 +59,7 @@ function passengerSummary(trip) {
 }
 
 function renderNotes(trip = {}) {
+    const event = trip.event_context || {};
     const route = trip.origin && trip.destination ? `${trip.origin} -> ${trip.destination}` : "";
     const date = trip.depart_date || (trip.date_window ? `${trip.date_window}, exact date needed` : "");
     const tripType = trip.trip_type === "roundtrip" ? "Round trip" : trip.trip_type === "oneway" ? "One way" : "";
@@ -67,6 +68,7 @@ function renderNotes(trip = {}) {
     const cabin = trip.cabin ? trip.cabin.replace("_", " ") : "";
 
     notesList.innerHTML = [
+        labelValue("Event", event.match ? `${event.match}, ${event.date}` : "None"),
         labelValue("Route", route),
         labelValue("Departure", date),
         labelValue("Trip type", tripType),
