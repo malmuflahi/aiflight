@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>AIFlight | Best Price AI</title>
-    <meta name="description" content="AIFlight chooses the best flight by balancing price, time, stops, and traveler preferences.">
+    <title>AIFlight | Chat Flight AI</title>
+    <meta name="description" content="AIFlight chats with travelers, gathers trip details, and finds the best live flight price.">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -12,165 +12,46 @@
 <header class="hero">
     <nav class="nav">
         <div class="brand">AIFlight</div>
-        <div class="nav-pill">AI vs Airline Pricing</div>
+        <div class="nav-pill">AI Travel Agent</div>
     </nav>
 
     <section class="hero-content">
-        <p class="eyebrow">Your personal flight decision engine</p>
-        <h1>Let AI pick the best flight, not thirty options.</h1>
+        <p class="eyebrow">Powered by chat-first flight AI</p>
+        <h1>Describe the trip. AIFlight asks what matters and finds the price.</h1>
         <p class="subtitle">
-            AIFlight scores live fares the way airlines use algorithms: price, time, stops, comfort, and tradeoffs. It tells you the move, like saving $200 by taking a flight one hour longer.
+            No long forms. No thirty-option homework. AIFlight takes notes, fills the missing details, and recommends the strongest live fare.
         </p>
     </section>
 </header>
 
-<main class="app-shell">
-    <section class="glass-panel">
-
+<main class="app-shell chat-layout">
+    <section class="glass-panel chat-panel">
         <div class="panel-head">
-            <h2>Build your flight strategy</h2>
-            <p>Tap your preferences. AIFlight will choose the strongest option for your trip.</p>
+            <h2>Chat with AIFlight</h2>
+            <p>Tell it the trip in your own words.</p>
         </div>
 
-        <div class="progress">
-            <span></span>
-        </div>
+        <div id="chatLog" class="chat-log" aria-live="polite"></div>
 
-        <form id="searchForm">
-
-            <div class="step">
-                <span class="step-label">01 / Route</span>
-
-                <div class="route-grid">
-                    <label>From
-                        <input id="origin" value="LGA">
-                    </label>
-
-                    <label>To
-                        <input id="destination" value="BOS">
-                    </label>
-                </div>
-            </div>
-
-            <div class="step">
-                <span class="step-label">02 / Trip type</span>
-
-                <div class="choice-grid two">
-                    <button type="button" class="choice active" data-group="tripType" data-value="oneway">One way</button>
-                    <button type="button" class="choice" data-group="tripType" data-value="roundtrip">Round trip</button>
-                </div>
-            </div>
-
-            <div class="step date-grid">
-                <label>Departure
-                    <input id="departDate" type="date">
-                </label>
-
-                <label id="returnWrap" style="display:none;">
-                    Return
-                    <input id="returnDate" type="date">
-                </label>
-            </div>
-
-            <div class="step">
-                <span class="step-label">03 / Passengers</span>
-
-                <div class="passenger-grid">
-                    <div class="counter">
-                        <span>Adults</span>
-                        <div>
-                            <button type="button" data-counter="adults" data-action="-">-</button>
-                            <strong id="adultsValue">1</strong>
-                            <button type="button" data-counter="adults" data-action="+">+</button>
-                        </div>
-                    </div>
-
-                    <div class="counter">
-                        <span>Children</span>
-                        <div>
-                            <button type="button" data-counter="children" data-action="-">-</button>
-                            <strong id="childrenValue">0</strong>
-                            <button type="button" data-counter="children" data-action="+">+</button>
-                        </div>
-                    </div>
-
-                    <div class="counter">
-                        <span>Infants</span>
-                        <div>
-                            <button type="button" data-counter="infants" data-action="-">-</button>
-                            <strong id="infantsValue">0</strong>
-                            <button type="button" data-counter="infants" data-action="+">+</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="step">
-                <span class="step-label">04 / What matters most?</span>
-
-                <div class="choice-grid premium">
-                    <button type="button" class="choice big active" data-group="priority" data-value="balanced">
-                        <b>Best Value</b>
-                        <span>Balance price, time, and stress</span>
-                    </button>
-
-                    <button type="button" class="choice big" data-group="priority" data-value="cheapest">
-                        <b>Cheapest</b>
-                        <span>Push for the lowest price</span>
-                    </button>
-
-                    <button type="button" class="choice big" data-group="priority" data-value="fastest">
-                        <b>Fastest</b>
-                        <span>Save time, even if it costs more</span>
-                    </button>
-
-                    <button type="button" class="choice big" data-group="priority" data-value="comfort">
-                        <b>Low Stress</b>
-                        <span>Fewer stops, smoother travel</span>
-                    </button>
-                </div>
-            </div>
-
-            <div class="step">
-                <span class="step-label">05 / Cabin</span>
-
-                <div class="choice-grid two">
-                    <button type="button" class="choice active" data-group="cabin" data-value="economy">Economy</button>
-                    <button type="button" class="choice" data-group="cabin" data-value="premium">Premium</button>
-                    <button type="button" class="choice" data-group="cabin" data-value="business">Business</button>
-                    <button type="button" class="choice" data-group="cabin" data-value="first">First</button>
-                </div>
-            </div>
-
-            <div class="step">
-                <span class="step-label">06 / Seat preference</span>
-
-                <div class="choice-grid two">
-                    <button type="button" class="choice active" data-group="seat" data-value="none">No preference</button>
-                    <button type="button" class="choice" data-group="seat" data-value="window">Window</button>
-                    <button type="button" class="choice" data-group="seat" data-value="aisle">Aisle</button>
-                </div>
-
-                <p class="note">Final seat availability confirmed on booking site.</p>
-            </div>
-
-            <textarea id="preference">I want the cheapest smart option, but I do not want a terrible layover.</textarea>
-
-            <input type="hidden" id="tripType" value="oneway">
-            <input type="hidden" id="priority" value="balanced">
-            <input type="hidden" id="cabin" value="economy">
-            <input type="hidden" id="seat" value="none">
-
-            <button class="primary-action" type="submit">Find My Best Flight</button>
-
-            <p class="trust-note">No booking pressure. Compare first. Decide smarter.</p>
-
+        <form id="chatForm" class="chat-form">
+            <textarea id="chatInput" rows="3" placeholder="Example: We need a comfortable trip next month to London. Money is not the biggest concern."></textarea>
+            <button id="sendButton" class="primary-action" type="submit">Send</button>
         </form>
+
+        <p class="trust-note">AIFlight will ask for missing dates, passengers, cabin, and route before searching prices.</p>
     </section>
 
-    <section id="status"></section>
-    <section id="strategy"></section>
-    <section id="results" class="results"></section>
+    <aside class="notes-panel">
+        <div class="panel-head compact">
+            <h2>AI notes</h2>
+            <p>What the chat has understood so far.</p>
+        </div>
+        <div id="notesList" class="notes-list"></div>
+    </aside>
+
+    <section id="status" class="full-width"></section>
+    <section id="strategy" class="full-width"></section>
+    <section id="results" class="results full-width"></section>
 </main>
 
 <script src="{{ url_for('static', filename='script.js') }}"></script>
