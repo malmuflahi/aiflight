@@ -18,6 +18,7 @@ except ImportError:
 app = Flask(__name__)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 DUFFEL_ACCESS_TOKEN = os.getenv("DUFFEL_ACCESS_TOKEN", "")
 
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY and OpenAI else None
@@ -364,7 +365,7 @@ def ai_extract_trip_details(message, current_trip, history):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=OPENAI_MODEL,
             response_format={"type": "json_object"},
             messages=[
                 {
@@ -482,6 +483,44 @@ def followup_reply(trip, missing):
 
     return f"I noted {summary}. I still need {needed}. Send that and I will pull live prices."
 
+def ai_followup_reply(message, trip, missing, history):
+    fallback = followup_reply(trip, missing)
+    if not client:
+        return fallback
+
+    try:
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are AIFlight, a smart travel-agent chat assistant. "
+                        "Reply naturally like ChatGPT, not like a form or fixed template. "
+                        "Use the structured trip notes as truth. Ask only for the missing fields. "
+                        "Do not invent dates, airports, passenger counts, prices, airlines, or tickets. "
+                        "Keep the reply short and helpful."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({
+                        "traveler_message": message,
+                        "recent_history": history[-8:] if isinstance(history, list) else [],
+                        "known_trip_notes": trip,
+                        "missing_fields": missing,
+                        "fallback_reply": fallback
+                    })
+                }
+            ],
+            max_tokens=180,
+            temperature=0.7
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as exc:
+        print("AI followup fallback:", str(exc), flush=True)
+        return fallback
+
 def prepare_chat_search_trip(trip):
     priority = trip.get("priority") or "balanced"
     return {
@@ -509,6 +548,58 @@ def trip_plan_line(trip):
         f"{trip.get('destination')} and planned {trip.get('origin')} -> {trip.get('destination')} "
         f"from {trip.get('depart_date')} to {trip.get('return_date')}."
     )
+
+def ai_chat_reply(message, trip, offers, cards, links, reason, plan, strategy, history):
+    if offers:
+        fallback = f"{plan} I found live prices and picked the strongest option: {cards[0]['signal']}. {strategy}".strip()
+    else:
+        fallback = f"{plan} {strategy}".strip()
+
+    if not client:
+        return fallback
+
+    try:
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are AIFlight, a ChatGPT-style travel assistant. "
+                        "Write a warm, direct travel-agent answer in natural language. "
+                        "Use only the provided trip, event, offers, cards, and strategy. "
+                        "If offers exist, clearly show the best price and why it won. "
+                        "If no offers exist, explain the search result without pretending prices exist. "
+                        "Do not invent match details, prices, airlines, ticket availability, hotels, or booking confirmations. "
+                        "Do not say you booked anything; say this is the plan/search result. "
+                        "Keep it concise but conversational."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({
+                        "traveler_message": message,
+                        "recent_history": history[-8:] if isinstance(history, list) else [],
+                        "trip": trip,
+                        "event_summary": event_context_summary(trip),
+                        "plan": plan,
+                        "offers": offers,
+                        "result_cards": cards,
+                        "search_links_available": bool(links),
+                        "reason_if_no_offers": reason,
+                        "deterministic_strategy": strategy,
+                        "fallback_reply": fallback
+                    })
+                }
+            ],
+            max_tokens=320,
+            temperature=0.72
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as exc:
+        print("AI chat reply fallback:", str(exc), flush=True)
+        return fallback
+
 
 @app.route("/")
 def home():
@@ -885,7 +976,7 @@ def ai_strategy(trip, offers, reason):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": "You are AIFlight, a flight price-defense algorithm."},
                 {"role": "user", "content": f"Trip: {trip}\nDuffel offers: {offers}\nDeterministic recommendation: {fallback}\nReason if empty: {reason}\nWrite a short, direct recommendation for one best flight. Mention useful tradeoffs like saving money for a longer trip when supported by the data. Do not invent prices, airlines, or flight details."}
@@ -918,7 +1009,7 @@ def chat():
     if missing:
         return jsonify({
             "complete": False,
-            "reply": followup_reply(trip, missing),
+            "reply": ai_followup_reply(message, trip, missing, history),
             "trip": trip,
             "missing": missing,
             "ai_enabled": bool(client),
@@ -942,10 +1033,7 @@ def chat():
 
     strategy = ai_strategy(search_trip, offers, reason)
     plan = trip_plan_line(search_trip)
-    if offers:
-        reply = f"{plan} I found live prices and picked the strongest option: {cards[0]['signal']}. {strategy}".strip()
-    else:
-        reply = f"{plan} {strategy}".strip()
+    reply = ai_chat_reply(message, search_trip, offers, cards, links, reason, plan, strategy, history)
 
     return jsonify({
         "complete": True,
