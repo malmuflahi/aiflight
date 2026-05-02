@@ -1,15 +1,25 @@
 import os
+import re
+from datetime import datetime
 from urllib.parse import quote_plus
 from flask import Flask, render_template, request, jsonify
-from openai import OpenAI
-import httpx
+
+try:
+    import httpx
+except ImportError:
+    httpx = None
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 app = Flask(__name__)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 DUFFEL_ACCESS_TOKEN = os.getenv("DUFFEL_ACCESS_TOKEN", "")
 
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY and OpenAI else None
 
 AIRPORT_MAP = {
     "egypt": "CAI", "cairo": "CAI",
@@ -23,6 +33,21 @@ AIRPORT_MAP = {
 def normalize_airport(value):
     value = (value or "").strip()
     return AIRPORT_MAP.get(value.lower(), value.upper())
+
+def parse_passenger_count(value, default=0, minimum=0):
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return default
+
+    return max(minimum, min(count, 9))
+
+def is_valid_date(value):
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return True
+    except (TypeError, ValueError):
+        return False
 
 @app.route("/")
 def home():
@@ -68,8 +93,12 @@ def cabin_for_duffel(cabin):
     return mapping.get(cabin, "economy")
 
 def fetch_duffel_offers(trip):
+    if not httpx:
+        print("httpx missing", flush=True)
+        return [], "missing_httpx"
+
     if not DUFFEL_ACCESS_TOKEN:
-        print("DEBUG: DUFFEL_ACCESS_TOKEN missing", flush=True)
+        print("DUFFEL_ACCESS_TOKEN missing", flush=True)
         return [], "missing_token"
 
     slices = [{
@@ -113,8 +142,7 @@ def fetch_duffel_offers(trip):
                 json=payload
             )
 
-        print("DEBUG: Duffel status:", response.status_code, flush=True)
-        print("DEBUG: Duffel raw:", response.text[:1000], flush=True)
+        print("Duffel status:", response.status_code, flush=True)
 
         if response.status_code >= 400:
             return [], f"duffel_error_{response.status_code}"
@@ -155,70 +183,178 @@ def fetch_duffel_offers(trip):
         return parsed, "ok"
 
     except Exception as e:
-        print("DEBUG: Duffel exception:", str(e), flush=True)
+        print("Duffel exception:", str(e), flush=True)
         return [], "exception"
 
 def fallback_cards(trip, links, reason):
     return [
         {
-            "title": "Duffel Search Needs Attention",
+            "title": "Live Search Needs Attention",
             "signal": "No offers returned",
             "status": reason,
             "goal": "Verify setup",
             "risk": "No live Duffel offer yet",
-            "explanation": "Duffel did not return offers for this search. Try JFK to LHR with a future date, confirm your token is saved in Render, or check Render logs."
+            "explanation": "AIFlight could not get live fares for this route yet. Try a major route with a future date, confirm the Duffel token is saved, or check the server logs."
         },
         {
-            "title": "Compare Manually",
-            "signal": "Use trusted sites",
+            "title": "Best Next Move",
+            "signal": "Check trusted sites",
             "status": "Fallback",
             "goal": "Still find real prices",
             "risk": "Prices may change",
-            "explanation": "Use Google Flights, Kayak, or Skyscanner while Duffel setup is being verified."
+            "explanation": "Use the search links below while live pricing is being verified. AIFlight will recommend one best option when offers are available."
         }
     ]
 
-def cards_from_offers(offers):
-    cheapest = min(offers, key=lambda x: float(x["price"] or 999999))
-    fewest_stops = min(offers, key=lambda x: x["stops"])
+def parse_price(value):
+    try:
+        return float(value or 999999)
+    except (TypeError, ValueError):
+        return 999999
+
+def parse_iso_duration(value):
+    if not value:
+        return None
+
+    match = re.fullmatch(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?", value)
+    if not match:
+        return None
+
+    days, hours, minutes = (int(part or 0) for part in match.groups())
+    return days * 1440 + hours * 60 + minutes
+
+def format_minutes(minutes):
+    if minutes is None:
+        return "duration not listed"
+
+    hours = minutes // 60
+    mins = minutes % 60
+    if hours and mins:
+        return f"{hours}h {mins}m"
+    if hours:
+        return f"{hours}h"
+    return f"{mins}m"
+
+def format_money(currency, amount):
+    amount = float(amount)
+    if amount >= 999999:
+        return f"{currency} unavailable"
+    if amount.is_integer():
+        return f"{currency} {int(amount):,}"
+    return f"{currency} {amount:,.2f}"
+
+def score_offer(offer, lowest_price, shortest_duration, priority):
+    price = parse_price(offer.get("price"))
+    duration = parse_iso_duration(offer.get("duration")) or shortest_duration or 0
+    stops = int(offer.get("stops") or 0)
+
+    price_penalty = 0 if lowest_price <= 0 else ((price - lowest_price) / lowest_price) * 100
+    time_penalty = 0 if not shortest_duration else max(0, (duration - shortest_duration) / 30) * 4
+    stop_penalty = stops * 14
+
+    weights = {
+        "cheapest": (1.45, 0.65, 0.80),
+        "fastest": (0.65, 1.45, 0.90),
+        "comfort": (0.80, 0.80, 1.55),
+        "balanced": (1.00, 1.00, 1.00)
+    }
+    price_weight, time_weight, stop_weight = weights.get(priority, weights["balanced"])
+
+    return (price_penalty * price_weight) + (time_penalty * time_weight) + (stop_penalty * stop_weight)
+
+def analyze_offers(offers, trip):
+    enriched = []
+
+    for offer in offers:
+        copy = dict(offer)
+        copy["price_value"] = parse_price(offer.get("price"))
+        copy["duration_minutes"] = parse_iso_duration(offer.get("duration"))
+        enriched.append(copy)
+
+    priced = [offer for offer in enriched if offer["price_value"] < 999999]
+    timed = [offer for offer in enriched if offer["duration_minutes"] is not None]
+
+    lowest_price = min((offer["price_value"] for offer in priced), default=999999)
+    shortest_duration = min((offer["duration_minutes"] for offer in timed), default=None)
+
+    for offer in enriched:
+        offer["ai_score"] = score_offer(
+            offer,
+            lowest_price,
+            shortest_duration,
+            trip.get("priority", "balanced")
+        )
+
+    ranked = sorted(enriched, key=lambda item: (item["ai_score"], item["price_value"]))
+    best = ranked[0]
+    cheapest = min(enriched, key=lambda item: item["price_value"])
+    fastest = min(enriched, key=lambda item: item["duration_minutes"] or 999999)
+
+    return ranked, best, cheapest, fastest
+
+def tradeoff_line(best, cheapest, fastest):
+    best_price = best["price_value"]
+    cheapest_price = cheapest["price_value"]
+    best_duration = best.get("duration_minutes")
+    fastest_duration = fastest.get("duration_minutes")
+
+    if best["id"] != cheapest["id"] and best_price - cheapest_price > 0:
+        extra = best_price - cheapest_price
+        return f"You could save {format_money(best['currency'], extra)} with {cheapest['airline']}, but AIFlight ranked this higher for the full trip."
+
+    if best["id"] != fastest["id"] and fastest["price_value"] - best_price > 0 and best_duration and fastest_duration:
+        savings = fastest["price_value"] - best_price
+        extra_minutes = best_duration - fastest_duration
+        if extra_minutes > 0:
+            return f"You save {format_money(best['currency'], savings)} by taking {format_minutes(extra_minutes)} longer than the fastest offer."
+
+    return "This is the best value after balancing fare, travel time, stops, and your stated preferences."
+
+def cards_from_offers(offers, trip):
+    ranked, best, cheapest, fastest = analyze_offers(offers, trip)
+    tradeoff = tradeoff_line(best, cheapest, fastest)
 
     cards = [
         {
-            "title": "Lowest Duffel Offer",
-            "signal": f"{cheapest['currency']} {cheapest['price']}",
-            "status": "Duffel offer",
-            "goal": "Save money",
-            "risk": "Offer can expire",
-            "explanation": f"{cheapest['airline']} returned the lowest offer. Verify baggage, seat, and ticket rules before booking."
-        },
-        {
-            "title": "Low-Stress Option",
-            "signal": f"{fewest_stops['stops']} stop(s)",
-            "status": "Duffel offer",
-            "goal": "Reduce stress",
-            "risk": "May cost more",
-            "explanation": f"{fewest_stops['airline']} has the lowest stop count in this search. Good for families or comfort-focused trips."
+            "title": "AIFlight Best Pick",
+            "signal": format_money(best["currency"], best["price_value"]),
+            "status": f"{best['airline']} - {best['stops']} stop(s)",
+            "goal": "Book the strongest overall value",
+            "risk": "Fare can expire or baggage rules may change",
+            "explanation": f"{tradeoff} Flight time: {format_minutes(best.get('duration_minutes'))}."
         }
     ]
 
-    for offer in offers[:4]:
+    for offer in ranked:
+        if offer["id"] == best["id"]:
+            continue
+
+        label = "Worth Comparing"
+        if offer["id"] == cheapest["id"]:
+            label = "Cheapest Backup"
+        elif offer["id"] == fastest["id"]:
+            label = "Fastest Backup"
+
         cards.append({
-            "title": offer["airline"],
-            "signal": f"{offer['currency']} {offer['price']}",
+            "title": label,
+            "signal": format_money(offer["currency"], offer["price_value"]),
             "status": f"{offer['stops']} stop(s)",
-            "goal": "Compare offer",
+            "goal": offer["airline"],
             "risk": "Offer expires",
-            "explanation": f"Duration: {offer['duration']}. Offer expires at {offer.get('expires_at') or 'provider-controlled time'}."
+            "explanation": f"Flight time: {format_minutes(offer.get('duration_minutes'))}. Offer expires at {offer.get('expires_at') or 'provider-controlled time'}."
         })
+
+        if len(cards) == 3:
+            break
 
     return cards
 
 def ai_strategy(trip, offers, reason):
     if offers:
-        cheapest = min(offers, key=lambda x: float(x["price"] or 999999))
+        ranked, best, cheapest, fastest = analyze_offers(offers, trip)
         fallback = (
-            f"Duffel returned real offers. The lowest offer shown is {cheapest['currency']} {cheapest['price']} "
-            f"with {cheapest['airline']}. Compare stops, duration, baggage, and expiration before booking."
+            f"AIFlight recommends {best['airline']} at {format_money(best['currency'], best['price_value'])}. "
+            f"{tradeoff_line(best, cheapest, fastest)} Check baggage, seats, and ticket rules before booking."
         )
     else:
         fallback = (
@@ -234,7 +370,7 @@ def ai_strategy(trip, offers, reason):
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are AIFlight, a flight price-defense algorithm."},
-                {"role": "user", "content": f"Trip: {trip}\nDuffel offers: {offers}\nReason if empty: {reason}\nWrite a short, honest recommendation. Do not invent prices."}
+                {"role": "user", "content": f"Trip: {trip}\nDuffel offers: {offers}\nDeterministic recommendation: {fallback}\nReason if empty: {reason}\nWrite a short, direct recommendation for one best flight. Mention useful tradeoffs like saving money for a longer trip when supported by the data. Do not invent prices, airlines, or flight details."}
             ],
             max_tokens=150,
             temperature=0.45
@@ -245,7 +381,7 @@ def ai_strategy(trip, offers, reason):
 
 @app.route("/api/search", methods=["POST"])
 def search():
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True) or {}
 
     trip = {
         "origin": normalize_airport(data.get("origin", "LGA")),
@@ -253,16 +389,25 @@ def search():
         "trip_type": data.get("tripType", "oneway"),
         "depart_date": data.get("departDate", ""),
         "return_date": data.get("returnDate", ""),
-        "adults": int(data.get("adults", 1)),
-        "children": int(data.get("children", 0)),
-        "infants": int(data.get("infants", 0)),
+        "adults": parse_passenger_count(data.get("adults", 1), default=1, minimum=1),
+        "children": parse_passenger_count(data.get("children", 0)),
+        "infants": parse_passenger_count(data.get("infants", 0)),
         "priority": data.get("priority", "balanced"),
         "cabin": data.get("cabin", "economy"),
         "seat": data.get("seat", "none"),
         "preference": data.get("preference", "")
     }
 
-    print("DEBUG: TRIP:", trip, flush=True)
+    if not trip["origin"] or not trip["destination"]:
+        return jsonify({"error": "Origin and destination are required."}), 400
+
+    if not is_valid_date(trip["depart_date"]):
+        return jsonify({"error": "A valid departure date is required."}), 400
+
+    if trip["trip_type"] == "roundtrip" and not is_valid_date(trip["return_date"]):
+        return jsonify({"error": "A valid return date is required for round trips."}), 400
+
+    print("Trip search:", trip, flush=True)
 
     links = build_search_links(
         trip["origin"],
@@ -275,7 +420,7 @@ def search():
     offers, reason = fetch_duffel_offers(trip)
 
     if offers:
-        cards = cards_from_offers(offers)
+        cards = cards_from_offers(offers, trip)
     else:
         cards = fallback_cards(trip, links, reason)
 
@@ -301,4 +446,8 @@ def health():
     })
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        debug=os.environ.get("FLASK_DEBUG") == "1"
+    )

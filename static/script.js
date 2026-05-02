@@ -10,7 +10,15 @@ const strategyBox = document.getElementById("strategy");
 const resultsBox = document.getElementById("results");
 const button = document.querySelector(".primary-action");
 
-// ---------- Choice Buttons ----------
+function escapeHTML(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 document.querySelectorAll(".choice").forEach(btn => {
     btn.onclick = () => {
         const { group, value } = btn.dataset;
@@ -30,11 +38,10 @@ document.querySelectorAll(".choice").forEach(btn => {
     };
 });
 
-// ---------- Passenger Counters ----------
 document.querySelectorAll("[data-counter]").forEach(btn => {
     btn.onclick = () => {
         const { counter, action } = btn.dataset;
-        let next = { ...state.passengers };
+        const next = { ...state.passengers };
 
         if (action === "+") next[counter]++;
         if (action === "-") next[counter]--;
@@ -42,28 +49,27 @@ document.querySelectorAll("[data-counter]").forEach(btn => {
         if (counter === "adults" && next[counter] < 1) next[counter] = 1;
         if (counter !== "adults" && next[counter] < 0) next[counter] = 0;
 
-        const total = Object.values(next).reduce((a,b)=>a+b,0);
-        if (total > 9) return alert("Max 9 passengers");
+        const total = Object.values(next).reduce((a, b) => a + b, 0);
+        if (total > 9) {
+            alert("Max 9 passengers");
+            return;
+        }
 
         state.passengers = next;
         document.getElementById(counter + "Value").textContent = next[counter];
     };
 });
 
-// ---------- Helpers ----------
 function showStatus(text) {
-    statusBox.innerHTML = `<p class="status-msg">${text}</p>`;
+    statusBox.innerHTML = `<p class="status-msg">${escapeHTML(text)}</p>`;
 }
 
 function showError(text) {
-    statusBox.innerHTML = `<p class="status-error">${text}</p>`;
+    statusBox.innerHTML = `<p class="status-error">${escapeHTML(text)}</p>`;
 }
 
-// ---------- Submit (THIS FIXES YOUR ISSUE) ----------
 form.addEventListener("submit", async function(e) {
-    e.preventDefault(); // 🚨 THIS STOPS PAGE REFRESH
-
-    console.log("Submitting search...");
+    e.preventDefault();
 
     const payload = {
         origin: document.getElementById("origin").value.trim(),
@@ -94,48 +100,50 @@ form.addEventListener("submit", async function(e) {
             body: JSON.stringify(payload)
         });
 
-        if (!res.ok) throw new Error("Request failed");
-
         const data = await res.json();
+
+        if (!res.ok) {
+            throw new Error(data.error || "Request failed");
+        }
+
+        const trip = data.trip || {};
 
         showStatus("Strategy ready.");
 
-        // ---------- Strategy ----------
         strategyBox.innerHTML = `
             <div class="strategy-box">
                 <h2>Recommended strategy</h2>
-                <p>${data.strategy}</p>
-                <small>${data.trip.origin} → ${data.trip.destination}</small>
+                <p>${escapeHTML(data.strategy)}</p>
+                <small>${escapeHTML(trip.origin)} -> ${escapeHTML(trip.destination)}</small>
             </div>
         `;
 
-        // ---------- Results ----------
         resultsBox.innerHTML = data.cards.map((card, i) => `
             <article class="result-card ${i === 0 ? "featured" : ""}">
                 ${i === 0 ? `<div class="ribbon">Recommended</div>` : ""}
-                
-                <h2>${card.title}</h2>
-                <p class="signal">${card.signal}</p>
+
+                <h2>${escapeHTML(card.title)}</h2>
+                <p class="signal">${escapeHTML(card.signal)}</p>
 
                 <div class="metrics">
-                    <div><strong>Status</strong><span>${card.status}</span></div>
-                    <div><strong>Goal</strong><span>${card.goal}</span></div>
-                    <div><strong>Risk</strong><span>${card.risk}</span></div>
+                    <div><strong>Status</strong><span>${escapeHTML(card.status)}</span></div>
+                    <div><strong>Goal</strong><span>${escapeHTML(card.goal)}</span></div>
+                    <div><strong>Risk</strong><span>${escapeHTML(card.risk)}</span></div>
                 </div>
 
-                <p class="explain">${card.explanation}</p>
+                <p class="explain">${escapeHTML(card.explanation)}</p>
 
                 <div class="buttons">
-                    <a href="${data.links.google}" target="_blank">Google</a>
-                    <a href="${data.links.kayak}" target="_blank">Kayak</a>
-                    <a href="${data.links.skyscanner}" target="_blank">Skyscanner</a>
+                    <a href="${escapeHTML(data.links.google)}" target="_blank" rel="noopener noreferrer">Google</a>
+                    <a href="${escapeHTML(data.links.kayak)}" target="_blank" rel="noopener noreferrer">Kayak</a>
+                    <a href="${escapeHTML(data.links.skyscanner)}" target="_blank" rel="noopener noreferrer">Skyscanner</a>
                 </div>
             </article>
         `).join("");
 
     } catch (err) {
         console.error(err);
-        showError("Something went wrong. Try again.");
+        showError(err.message || "Something went wrong. Try again.");
     } finally {
         button.disabled = false;
         button.textContent = "Defend My Fare";

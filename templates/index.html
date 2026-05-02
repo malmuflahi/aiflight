@@ -1,24 +1,25 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>AIFlight | Price Defense</title>
-    <meta name="description" content="AIFlight helps travelers compare flight prices, predict fare changes, and choose when to book.">
+    <meta charset="UTF-8">
+    <title>AIFlight | Best Price AI</title>
+    <meta name="description" content="AIFlight chooses the best flight by balancing price, time, stops, and traveler preferences.">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 
 <header class="hero">
     <nav class="nav">
         <div class="brand">AIFlight</div>
-        <div class="nav-pill">AI Price Defense</div>
+        <div class="nav-pill">AI vs Airline Pricing</div>
     </nav>
 
     <section class="hero-content">
-        <p class="eyebrow">Your personal fare defense system</p>
-        <h1>Know when to book, when to wait, and when airlines are overcharging.</h1>
+        <p class="eyebrow">Your personal flight decision engine</p>
+        <h1>Let AI pick the best flight, not thirty options.</h1>
         <p class="subtitle">
-            AIFlight helps you compare smarter, avoid bad layovers, and choose the best time to book — without guessing.
+            AIFlight scores live fares the way airlines use algorithms: price, time, stops, comfort, and tradeoffs. It tells you the move, like saving $200 by taking a flight one hour longer.
         </p>
     </section>
 </header>
@@ -28,7 +29,7 @@
 
         <div class="panel-head">
             <h2>Build your flight strategy</h2>
-            <p>Tap your preferences. We’ll create a smarter fare-defense plan.</p>
+            <p>Tap your preferences. AIFlight will choose the strongest option for your trip.</p>
         </div>
 
         <div class="progress">
@@ -38,7 +39,7 @@
         <form id="searchForm">
 
             <div class="step">
-                <span class="step-label">01 · Route</span>
+                <span class="step-label">01 / Route</span>
 
                 <div class="route-grid">
                     <label>From
@@ -52,7 +53,7 @@
             </div>
 
             <div class="step">
-                <span class="step-label">02 · Trip type</span>
+                <span class="step-label">02 / Trip type</span>
 
                 <div class="choice-grid two">
                     <button type="button" class="choice active" data-group="tripType" data-value="oneway">One way</button>
@@ -72,13 +73,13 @@
             </div>
 
             <div class="step">
-                <span class="step-label">03 · Passengers</span>
+                <span class="step-label">03 / Passengers</span>
 
                 <div class="passenger-grid">
                     <div class="counter">
                         <span>Adults</span>
                         <div>
-                            <button type="button" data-counter="adults" data-action="-">−</button>
+                            <button type="button" data-counter="adults" data-action="-">-</button>
                             <strong id="adultsValue">1</strong>
                             <button type="button" data-counter="adults" data-action="+">+</button>
                         </div>
@@ -87,7 +88,7 @@
                     <div class="counter">
                         <span>Children</span>
                         <div>
-                            <button type="button" data-counter="children" data-action="-">−</button>
+                            <button type="button" data-counter="children" data-action="-">-</button>
                             <strong id="childrenValue">0</strong>
                             <button type="button" data-counter="children" data-action="+">+</button>
                         </div>
@@ -96,7 +97,7 @@
                     <div class="counter">
                         <span>Infants</span>
                         <div>
-                            <button type="button" data-counter="infants" data-action="-">−</button>
+                            <button type="button" data-counter="infants" data-action="-">-</button>
                             <strong id="infantsValue">0</strong>
                             <button type="button" data-counter="infants" data-action="+">+</button>
                         </div>
@@ -105,7 +106,7 @@
             </div>
 
             <div class="step">
-                <span class="step-label">04 · What matters most?</span>
+                <span class="step-label">04 / What matters most?</span>
 
                 <div class="choice-grid premium">
                     <button type="button" class="choice big active" data-group="priority" data-value="balanced">
@@ -131,7 +132,7 @@
             </div>
 
             <div class="step">
-                <span class="step-label">05 · Cabin</span>
+                <span class="step-label">05 / Cabin</span>
 
                 <div class="choice-grid two">
                     <button type="button" class="choice active" data-group="cabin" data-value="economy">Economy</button>
@@ -142,7 +143,7 @@
             </div>
 
             <div class="step">
-                <span class="step-label">06 · Seat preference</span>
+                <span class="step-label">06 / Seat preference</span>
 
                 <div class="choice-grid two">
                     <button type="button" class="choice active" data-group="seat" data-value="none">No preference</button>
@@ -160,7 +161,7 @@
             <input type="hidden" id="cabin" value="economy">
             <input type="hidden" id="seat" value="none">
 
-            <button class="primary-action" type="submit">Defend My Fare</button>
+            <button class="primary-action" type="submit">Find My Best Flight</button>
 
             <p class="trust-note">No booking pressure. Compare first. Decide smarter.</p>
 
@@ -172,6 +173,6 @@
     <section id="results" class="results"></section>
 </main>
 
-<script src="/static/script.js"></script>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
