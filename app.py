@@ -149,6 +149,8 @@ def fetch_duffel_offers(trip):
 
         data = response.json().get("data", {})
         offers = data.get("offers", [])[:8]
+        if not offers:
+            return [], "no_offers"
 
         parsed = []
         for offer in offers:
@@ -180,21 +182,78 @@ def fetch_duffel_offers(trip):
                 "expires_at": offer.get("expires_at")
             })
 
+        if not parsed:
+            return [], "no_parseable_offers"
+
         return parsed, "ok"
 
     except Exception as e:
         print("Duffel exception:", str(e), flush=True)
         return [], "exception"
 
+def fallback_details(trip, reason):
+    route = f"{trip['origin']} to {trip['destination']}"
+
+    if reason == "no_offers":
+        return {
+            "title": "No Matching Live Fares Yet",
+            "signal": "Duffel connected",
+            "status": "No offers for this search",
+            "goal": "Try nearby airports or dates",
+            "risk": "This route/date may not have bookable inventory",
+            "explanation": f"Duffel answered successfully, but did not return bookable fares for {route} on this date. Try JFK or EWR instead of LGA, a date a few days later, or a bigger test route like JFK to LHR."
+        }
+
+    if reason == "missing_httpx":
+        return {
+            "title": "Live Search Needs Dependencies",
+            "signal": "Install requirements",
+            "status": "Missing httpx",
+            "goal": "Enable Duffel calls",
+            "risk": "No live prices until dependencies are installed",
+            "explanation": "The app is running without the httpx package, so it cannot call Duffel. Install requirements.txt in the same Python environment that runs Flask."
+        }
+
+    if reason == "missing_token":
+        return {
+            "title": "Live Search Needs a Duffel Token",
+            "signal": "Token missing",
+            "status": "Duffel not configured",
+            "goal": "Connect live fares",
+            "risk": "No live prices until the token is set",
+            "explanation": "Set DUFFEL_ACCESS_TOKEN in your local environment or Render environment variables, then restart the app."
+        }
+
+    if reason.startswith("duffel_error_"):
+        return {
+            "title": "Duffel Rejected This Search",
+            "signal": reason.replace("_", " "),
+            "status": "Duffel API error",
+            "goal": "Check route and credentials",
+            "risk": "Live fares were not returned",
+            "explanation": "Duffel returned an error for this search. Check the server logs for the API response, confirm the airport codes and dates, and verify the token has access."
+        }
+
+    return {
+        "title": "Live Search Needs Attention",
+        "signal": "No offers returned",
+        "status": "Search incomplete",
+        "goal": "Check live pricing",
+        "risk": "No live Duffel offer yet",
+        "explanation": f"AIFlight could not get live fares for {route} yet. Try a major route with a future date or check the server logs."
+    }
+
 def fallback_cards(trip, links, reason):
+    details = fallback_details(trip, reason)
+
     return [
         {
-            "title": "Live Search Needs Attention",
-            "signal": "No offers returned",
-            "status": reason,
-            "goal": "Verify setup",
-            "risk": "No live Duffel offer yet",
-            "explanation": "AIFlight could not get live fares for this route yet. Try a major route with a future date, confirm the Duffel token is saved, or check the server logs."
+            "title": details["title"],
+            "signal": details["signal"],
+            "status": details["status"],
+            "goal": details["goal"],
+            "risk": details["risk"],
+            "explanation": details["explanation"]
         },
         {
             "title": "Best Next Move",
@@ -357,10 +416,8 @@ def ai_strategy(trip, offers, reason):
             f"{tradeoff_line(best, cheapest, fastest)} Check baggage, seats, and ticket rules before booking."
         )
     else:
-        fallback = (
-            f"Duffel returned no offers for {trip['origin']} to {trip['destination']} yet. "
-            f"Reason: {reason}. Try a major test route like JFK to LHR and a future date."
-        )
+        fallback_info = fallback_details(trip, reason)
+        fallback = fallback_info["explanation"]
 
     if not client:
         return fallback

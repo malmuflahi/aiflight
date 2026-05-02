@@ -86,12 +86,12 @@ form.addEventListener("submit", async function(e) {
         preference: document.getElementById("preference").value
     };
 
-    showStatus("Analyzing route and defending your fare...");
+    showStatus("AIFlight is checking live fares and scoring price, time, stops, and comfort...");
     strategyBox.innerHTML = "";
     resultsBox.innerHTML = "";
 
     button.disabled = true;
-    button.textContent = "Defending...";
+    button.textContent = "Choosing...";
 
     try {
         const res = await fetch("/api/search", {
@@ -108,11 +108,11 @@ form.addEventListener("submit", async function(e) {
 
         const trip = data.trip || {};
 
-        showStatus("Strategy ready.");
+        showStatus(data.ai_enabled ? "AI recommendation ready." : "Recommendation ready.");
 
         strategyBox.innerHTML = `
             <div class="strategy-box">
-                <h2>Recommended strategy</h2>
+                <h2>Best flight strategy</h2>
                 <p>${escapeHTML(data.strategy)}</p>
                 <small>${escapeHTML(trip.origin)} -> ${escapeHTML(trip.destination)}</small>
             </div>
@@ -120,7 +120,7 @@ form.addEventListener("submit", async function(e) {
 
         resultsBox.innerHTML = data.cards.map((card, i) => `
             <article class="result-card ${i === 0 ? "featured" : ""}">
-                ${i === 0 ? `<div class="ribbon">Recommended</div>` : ""}
+                ${i === 0 ? `<div class="ribbon">Best Pick</div>` : ""}
 
                 <h2>${escapeHTML(card.title)}</h2>
                 <p class="signal">${escapeHTML(card.signal)}</p>
@@ -146,6 +146,6 @@ form.addEventListener("submit", async function(e) {
         showError(err.message || "Something went wrong. Try again.");
     } finally {
         button.disabled = false;
-        button.textContent = "Defend My Fare";
+        button.textContent = "Find My Best Flight";
     }
 });

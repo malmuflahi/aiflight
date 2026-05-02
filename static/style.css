@@ -340,6 +340,50 @@ textarea {
     border: 1px solid #38bdf8;
 }
 
+.result-card h2 {
+    margin: 0 0 8px;
+}
+
+.signal {
+    color: #bae6fd;
+    font-size: 24px;
+    font-weight: 950;
+    margin: 0 0 18px;
+}
+
+.metrics {
+    display: grid;
+    gap: 12px;
+    margin: 18px 0;
+}
+
+.metrics div {
+    display: grid;
+    gap: 5px;
+    padding: 14px;
+    border-radius: 18px;
+    background: rgba(15,23,42,.58);
+    border: 1px solid rgba(255,255,255,.08);
+}
+
+.metrics strong {
+    color: #7dd3fc;
+    font-size: 12px;
+    letter-spacing: .7px;
+    text-transform: uppercase;
+}
+
+.metrics span {
+    color: #f8fafc;
+    font-weight: 800;
+    line-height: 1.35;
+}
+
+.explain {
+    color: #cbd5e1;
+    line-height: 1.6;
+}
+
 .ribbon {
     display: inline-block;
     padding: 10px 14px;
