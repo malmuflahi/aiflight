@@ -7,26 +7,17 @@ import httpx
 app = Flask(__name__)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+DUFFEL_ACCESS_TOKEN = os.getenv("DUFFEL_ACCESS_TOKEN", "")
+
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-FLIGHT_API_KEY = os.getenv("FLIGHT_API_KEY", "")
-FLIGHT_API_ID = os.getenv("FLIGHT_API_ID", "")
-
 AIRPORT_MAP = {
-    "egypt": "CAI",
-    "cairo": "CAI",
-    "new york": "JFK",
-    "nyc": "JFK",
-    "lga": "LGA",
-    "jfk": "JFK",
-    "ewr": "EWR",
-    "boston": "BOS",
-    "bos": "BOS",
-    "london": "LHR",
-    "lhr": "LHR",
-    "dubai": "DXB",
-    "los angeles": "LAX",
-    "la": "LAX",
+    "egypt": "CAI", "cairo": "CAI",
+    "new york": "JFK", "nyc": "JFK",
+    "lga": "LGA", "jfk": "JFK", "ewr": "EWR",
+    "boston": "BOS", "bos": "BOS",
+    "london": "LHR", "lhr": "LHR",
+    "dubai": "DXB", "los angeles": "LAX", "la": "LAX"
 }
 
 def normalize_airport(value):
@@ -37,13 +28,12 @@ def normalize_airport(value):
 def home():
     return render_template("index.html")
 
-def build_links(origin, destination, trip_type, depart_date, return_date):
-    google_query = f"flights from {origin} to {destination} on {depart_date}"
+def build_search_links(origin, destination, trip_type, depart_date, return_date):
+    q = f"flights from {origin} to {destination} on {depart_date}"
     if trip_type == "roundtrip" and return_date:
-        google_query = f"round trip flights from {origin} to {destination} depart {depart_date} return {return_date}"
+        q = f"round trip flights from {origin} to {destination} depart {depart_date} return {return_date}"
 
-    google = f"https://www.google.com/travel/flights?q={quote_plus(google_query)}"
-
+    google = f"https://www.google.com/travel/flights?q={quote_plus(q)}"
     kayak = f"https://www.kayak.com/flights/{origin}-{destination}/{depart_date}"
     if trip_type == "roundtrip" and return_date:
         kayak = f"https://www.kayak.com/flights/{origin}-{destination}/{depart_date}/{return_date}"
@@ -54,149 +44,186 @@ def build_links(origin, destination, trip_type, depart_date, return_date):
 
     return {"google": google, "kayak": kayak, "skyscanner": skyscanner}
 
-def fetch_travelpayouts_prices(trip):
-    if not FLIGHT_API_KEY:
-        print("DEBUG: FLIGHT_API_KEY missing", flush=True)
-        return []
+def build_passengers(adults, children, infants):
+    passengers = []
 
-    url = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
+    for _ in range(adults):
+        passengers.append({"type": "adult"})
 
-    params = {
+    for _ in range(children):
+        passengers.append({"type": "child"})
+
+    for _ in range(infants):
+        passengers.append({"type": "infant_without_seat"})
+
+    return passengers
+
+def cabin_for_duffel(cabin):
+    mapping = {
+        "economy": "economy",
+        "premium": "premium_economy",
+        "business": "business",
+        "first": "first"
+    }
+    return mapping.get(cabin, "economy")
+
+def fetch_duffel_offers(trip):
+    if not DUFFEL_ACCESS_TOKEN:
+        print("DEBUG: DUFFEL_ACCESS_TOKEN missing", flush=True)
+        return [], "missing_token"
+
+    slices = [{
         "origin": trip["origin"],
         "destination": trip["destination"],
-        "departure_at": trip["depart_date"],
-        "currency": "usd",
-        "sorting": "price",
-        "limit": 10,
-        "token": FLIGHT_API_KEY,
-    }
+        "departure_date": trip["depart_date"]
+    }]
 
     if trip["trip_type"] == "roundtrip" and trip["return_date"]:
-        params["return_at"] = trip["return_date"]
+        slices.append({
+            "origin": trip["destination"],
+            "destination": trip["origin"],
+            "departure_date": trip["return_date"]
+        })
 
-    print("DEBUG: Travelpayouts request params:", params, flush=True)
+    payload = {
+        "data": {
+            "slices": slices,
+            "passengers": build_passengers(
+                trip["adults"],
+                trip["children"],
+                trip["infants"]
+            ),
+            "cabin_class": cabin_for_duffel(trip["cabin"])
+        }
+    }
+
+    headers = {
+        "Authorization": f"Bearer {DUFFEL_ACCESS_TOKEN}",
+        "Duffel-Version": "v2",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Accept-Encoding": "gzip"
+    }
 
     try:
-        with httpx.Client(timeout=25) as client_http:
-            response = client_http.get(url, params=params)
+        with httpx.Client(timeout=35) as http:
+            response = http.post(
+                "https://api.duffel.com/air/offer_requests?return_offers=true",
+                headers=headers,
+                json=payload
+            )
 
-        print("DEBUG: Travelpayouts status:", response.status_code, flush=True)
-        print("DEBUG: Travelpayouts raw response:", response.text[:1000], flush=True)
+        print("DEBUG: Duffel status:", response.status_code, flush=True)
+        print("DEBUG: Duffel raw:", response.text[:1000], flush=True)
 
-        response.raise_for_status()
-        payload = response.json()
+        if response.status_code >= 400:
+            return [], f"duffel_error_{response.status_code}"
 
-        flights = []
-        for item in payload.get("data", []):
-            flights.append({
-                "price": item.get("price"),
-                "airline": item.get("airline", "Airline"),
-                "flight_number": item.get("flight_number"),
-                "departure_at": item.get("departure_at"),
-                "return_at": item.get("return_at"),
-                "transfers": item.get("transfers", 0),
-                "duration": item.get("duration"),
-                "link": item.get("link"),
+        data = response.json().get("data", {})
+        offers = data.get("offers", [])[:8]
+
+        parsed = []
+        for offer in offers:
+            total_amount = offer.get("total_amount")
+            total_currency = offer.get("total_currency", "USD")
+            slices_data = offer.get("slices", [])
+
+            first_slice = slices_data[0] if slices_data else {}
+            segments = first_slice.get("segments", [])
+            first_segment = segments[0] if segments else {}
+
+            airline = (
+                first_segment.get("marketing_carrier", {}).get("name")
+                or first_segment.get("operating_carrier", {}).get("name")
+                or "Airline"
+            )
+
+            stops = max(0, len(segments) - 1)
+            duration = first_slice.get("duration", "Check on offer")
+
+            parsed.append({
+                "id": offer.get("id"),
+                "price": total_amount,
+                "currency": total_currency,
+                "airline": airline,
+                "duration": duration,
+                "stops": stops,
+                "payment_required_by": offer.get("payment_required_by"),
+                "expires_at": offer.get("expires_at")
             })
 
-        print("DEBUG: FLIGHTS:", flights, flush=True)
-        return flights
+        return parsed, "ok"
 
-    except Exception as error:
-        print("DEBUG: Travelpayouts error:", str(error), flush=True)
-        return []
+    except Exception as e:
+        print("DEBUG: Duffel exception:", str(e), flush=True)
+        return [], "exception"
 
-def build_affiliate_link(raw_link):
-    if not raw_link:
-        return None
-
-    if raw_link.startswith("http"):
-        return raw_link
-
-    base = f"https://www.aviasales.com{raw_link}"
-
-    if FLIGHT_API_ID:
-        separator = "&" if "?" in base else "?"
-        return f"{base}{separator}marker={FLIGHT_API_ID}"
-
-    return base
-
-def build_cards(trip, flights):
-    if flights:
-        cheapest = min(flights, key=lambda x: x.get("price") or 999999)
-        fewest_stops = min(flights, key=lambda x: x.get("transfers", 99))
-
-        return [
-            {
-                "title": "Lowest Real Fare Found",
-                "signal": f"${cheapest.get('price', 'Check price')}",
-                "status": "Live API result",
-                "goal": "Save money",
-                "risk": "Verify before booking",
-                "explanation": f"We found a live fare from {trip['origin']} to {trip['destination']}. Compare it before booking because flight prices can change.",
-                "booking_link": build_affiliate_link(cheapest.get("link")),
-            },
-            {
-                "title": "Low-Stress Route Check",
-                "signal": "Fewer stops",
-                "status": "Comfort check",
-                "goal": "Reduce stress",
-                "risk": "May cost more",
-                "explanation": "This option focuses on fewer stops and a smoother route.",
-                "booking_link": build_affiliate_link(fewest_stops.get("link")),
-            },
-            {
-                "title": "Price Defense Move",
-                "signal": "Compare before buying",
-                "status": "Smart check",
-                "goal": "Avoid overpaying",
-                "risk": "Prices can change",
-                "explanation": "Do not trust one site only. Check at least two booking sites before paying.",
-                "booking_link": None,
-            },
-        ]
-
+def fallback_cards(trip, links, reason):
     return [
         {
-            "title": "Live Data Not Returned Yet",
-            "signal": "Use search links",
-            "status": "Fallback mode",
-            "goal": "Still compare real prices",
-            "risk": "API may be pending approval",
-            "explanation": "Your API key is loaded, but the provider returned no live fares for this search. Use the search links below while approval or route coverage is pending.",
-            "booking_link": None,
+            "title": "Duffel Search Needs Attention",
+            "signal": "No offers returned",
+            "status": reason,
+            "goal": "Verify setup",
+            "risk": "No live Duffel offer yet",
+            "explanation": "Duffel did not return offers for this search. Try JFK to LHR with a future date, confirm your token is saved in Render, or check Render logs."
         },
         {
-            "title": "Cheapest Hunt",
-            "signal": "Lowest-price search",
-            "status": "Compare sites",
-            "goal": "Save money",
-            "risk": "May include layovers",
-            "explanation": "Best when price matters most. Check nearby airports and flexible dates.",
-            "booking_link": None,
-        },
-        {
-            "title": "Low-Stress Hunt",
-            "signal": "Comfort-first",
-            "status": "Reduce stress",
-            "goal": "Better route",
-            "risk": "May cost more",
-            "explanation": "Best for family trips, kids, infants, or long international routes.",
-            "booking_link": None,
-        },
+            "title": "Compare Manually",
+            "signal": "Use trusted sites",
+            "status": "Fallback",
+            "goal": "Still find real prices",
+            "risk": "Prices may change",
+            "explanation": "Use Google Flights, Kayak, or Skyscanner while Duffel setup is being verified."
+        }
     ]
 
-def ai_strategy(trip, flights):
-    if flights:
-        cheapest = min(flights, key=lambda x: x.get("price") or 999999)
+def cards_from_offers(offers):
+    cheapest = min(offers, key=lambda x: float(x["price"] or 999999))
+    fewest_stops = min(offers, key=lambda x: x["stops"])
+
+    cards = [
+        {
+            "title": "Lowest Duffel Offer",
+            "signal": f"{cheapest['currency']} {cheapest['price']}",
+            "status": "Duffel offer",
+            "goal": "Save money",
+            "risk": "Offer can expire",
+            "explanation": f"{cheapest['airline']} returned the lowest offer. Verify baggage, seat, and ticket rules before booking."
+        },
+        {
+            "title": "Low-Stress Option",
+            "signal": f"{fewest_stops['stops']} stop(s)",
+            "status": "Duffel offer",
+            "goal": "Reduce stress",
+            "risk": "May cost more",
+            "explanation": f"{fewest_stops['airline']} has the lowest stop count in this search. Good for families or comfort-focused trips."
+        }
+    ]
+
+    for offer in offers[:4]:
+        cards.append({
+            "title": offer["airline"],
+            "signal": f"{offer['currency']} {offer['price']}",
+            "status": f"{offer['stops']} stop(s)",
+            "goal": "Compare offer",
+            "risk": "Offer expires",
+            "explanation": f"Duration: {offer['duration']}. Offer expires at {offer.get('expires_at') or 'provider-controlled time'}."
+        })
+
+    return cards
+
+def ai_strategy(trip, offers, reason):
+    if offers:
+        cheapest = min(offers, key=lambda x: float(x["price"] or 999999))
         fallback = (
-            f"Lowest live fare found is about ${cheapest.get('price')}. "
-            "Compare this fare across multiple booking sites before booking."
+            f"Duffel returned real offers. The lowest offer shown is {cheapest['currency']} {cheapest['price']} "
+            f"with {cheapest['airline']}. Compare stops, duration, baggage, and expiration before booking."
         )
     else:
         fallback = (
-            f"No live fare was returned for {trip['origin']} to {trip['destination']} yet. "
-            "Use the booking links to verify real-time prices, and try nearby airports or flexible dates."
+            f"Duffel returned no offers for {trip['origin']} to {trip['destination']} yet. "
+            f"Reason: {reason}. Try a major test route like JFK to LHR and a future date."
         )
 
     if not client:
@@ -206,28 +233,14 @@ def ai_strategy(trip, flights):
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are AIFlight, a flight price defense algorithm."},
-                {
-                    "role": "user",
-                    "content": f"""
-Trip:
-{trip}
-
-Live flight data:
-{flights}
-
-Write a short recommendation.
-Do not invent prices or durations.
-If no live data exists, say to compare booking sites and try nearby airports.
-"""
-                }
+                {"role": "system", "content": "You are AIFlight, a flight price-defense algorithm."},
+                {"role": "user", "content": f"Trip: {trip}\nDuffel offers: {offers}\nReason if empty: {reason}\nWrite a short, honest recommendation. Do not invent prices."}
             ],
             max_tokens=150,
-            temperature=0.5
+            temperature=0.45
         )
         return response.choices[0].message.content.strip()
-    except Exception as error:
-        print("DEBUG: OpenAI error:", str(error), flush=True)
+    except Exception:
         return fallback
 
 @app.route("/api/search", methods=["POST"])
@@ -246,34 +259,37 @@ def search():
         "priority": data.get("priority", "balanced"),
         "cabin": data.get("cabin", "economy"),
         "seat": data.get("seat", "none"),
-        "preference": data.get("preference", ""),
+        "preference": data.get("preference", "")
     }
 
-    print("DEBUG: SEARCH TRIP:", trip, flush=True)
+    print("DEBUG: TRIP:", trip, flush=True)
 
-    links = build_links(
+    links = build_search_links(
         trip["origin"],
         trip["destination"],
         trip["trip_type"],
         trip["depart_date"],
-        trip["return_date"],
+        trip["return_date"]
     )
 
-    flights = fetch_travelpayouts_prices(trip)
-    cards = build_cards(trip, flights)
-    strategy = ai_strategy(trip, flights)
+    offers, reason = fetch_duffel_offers(trip)
 
-    print("DEBUG: FINAL FLIGHTS COUNT:", len(flights), flush=True)
-    print("DEBUG: FINAL CARDS COUNT:", len(cards), flush=True)
+    if offers:
+        cards = cards_from_offers(offers)
+    else:
+        cards = fallback_cards(trip, links, reason)
+
+    strategy = ai_strategy(trip, offers, reason)
 
     return jsonify({
         "ai_enabled": bool(client),
-        "flight_api_enabled": bool(FLIGHT_API_KEY),
+        "duffel_enabled": bool(DUFFEL_ACCESS_TOKEN),
         "trip": trip,
         "strategy": strategy,
         "cards": cards,
-        "flights": flights,
+        "offers": offers,
         "links": links,
+        "reason": reason
     })
 
 @app.route("/api/health")
@@ -281,7 +297,7 @@ def health():
     return jsonify({
         "status": "ok",
         "ai_enabled": bool(client),
-        "flight_api_enabled": bool(FLIGHT_API_KEY),
+        "duffel_enabled": bool(DUFFEL_ACCESS_TOKEN)
     })
 
 if __name__ == "__main__":
