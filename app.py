@@ -55,6 +55,18 @@ WORLD_CUP_TEXAS_FIRST_MATCH = {
     "source": "FIFA and NRG Park schedule"
 }
 
+NEARBY_AIRPORTS = {
+    "JFK": ["JFK", "EWR", "LGA"],
+    "EWR": ["EWR", "JFK", "LGA"],
+    "LGA": ["LGA", "JFK", "EWR"],
+    "LHR": ["LHR", "LGW"],
+    "LGW": ["LGW", "LHR"],
+    "CDG": ["CDG", "ORY"],
+    "ORY": ["ORY", "CDG"],
+    "IAH": ["IAH", "HOU"],
+    "HOU": ["HOU", "IAH"]
+}
+
 def normalize_airport(value):
     value = (value or "").strip()
     if not value:
@@ -686,6 +698,7 @@ def ai_chat_reply(message, trip, offers, cards, links, reason, plan, strategy, h
                         "event_summary": event_context_summary(trip),
                         "plan": plan,
                         "offers": offers,
+                        "deal_space": trip.get("deal_space", []),
                         "result_cards": cards,
                         "search_links_available": bool(links),
                         "reason_if_no_offers": reason,
@@ -723,6 +736,8 @@ def ai_agent_brain(message, current_trip, history):
         "Required before live search: origin IATA, destination IATA, departure date YYYY-MM-DD, trip_type oneway or roundtrip, "
         "return date if roundtrip, and adults. Cabin defaults to economy. Priority defaults to balanced. "
         "If a user gives a date range and trip length, choose a sensible departure/return within the range and state the assumption. "
+        "Outsmart airline pricing AI legally by asking for/using flexibility: nearby airports, date shifts, lower-stress routes, "
+        "time-versus-money tradeoffs, and avoiding unnecessary paid bundles. "
         "If ready_to_search is false, ask only for the important missing details. "
         "If ready_to_search is true, do not invent prices; the backend will search live offers. "
         "Return JSON only with keys: reply, trip, ready_to_search, missing_fields. "
@@ -908,6 +923,98 @@ def fetch_duffel_offers(trip):
         print("Duffel exception:", str(e), flush=True)
         return [], "exception"
 
+def shift_date(value, days):
+    if not is_valid_date(value):
+        return value
+    return (datetime.strptime(value, "%Y-%m-%d").date() + timedelta(days=days)).strftime("%Y-%m-%d")
+
+def candidate_key(trip):
+    return (
+        trip.get("origin"),
+        trip.get("destination"),
+        trip.get("trip_type"),
+        trip.get("depart_date"),
+        trip.get("return_date"),
+        trip.get("cabin")
+    )
+
+def build_counter_pricing_candidates(trip):
+    base = dict(trip)
+    base["search_note"] = "Exact trip"
+    candidates = [base]
+    seen = {candidate_key(base)}
+
+    def add_candidate(updates, note):
+        candidate = dict(trip)
+        candidate.update(updates)
+        candidate["search_note"] = note
+        key = candidate_key(candidate)
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(candidate)
+
+    if trip.get("priority") != "fastest":
+        for delta in (-1, 1):
+            updates = {"depart_date": shift_date(trip["depart_date"], delta)}
+            if trip.get("trip_type") == "roundtrip" and trip.get("return_date"):
+                updates["return_date"] = shift_date(trip["return_date"], delta)
+            add_candidate(updates, f"{abs(delta)} day {'earlier' if delta < 0 else 'later'}")
+
+    origin_options = NEARBY_AIRPORTS.get(trip.get("origin"), [trip.get("origin")])
+    destination_options = NEARBY_AIRPORTS.get(trip.get("destination"), [trip.get("destination")])
+
+    for origin in origin_options[1:2]:
+        add_candidate({"origin": origin}, f"Nearby origin {origin}")
+
+    for destination in destination_options[1:2]:
+        add_candidate({"destination": destination}, f"Nearby destination {destination}")
+
+    return candidates[:5]
+
+def fetch_deal_space_offers(trip):
+    if not httpx or not DUFFEL_ACCESS_TOKEN:
+        offers, reason = fetch_duffel_offers(dict(trip, search_note="Exact trip"))
+        return offers, reason, [{
+            "search_note": "Exact trip",
+            "origin": trip.get("origin"),
+            "destination": trip.get("destination"),
+            "depart_date": trip.get("depart_date"),
+            "return_date": trip.get("return_date"),
+            "reason": reason,
+            "offers": len(offers)
+        }]
+
+    all_offers = []
+    reasons = []
+
+    for candidate in build_counter_pricing_candidates(trip):
+        offers, reason = fetch_duffel_offers(candidate)
+        reasons.append({
+            "search_note": candidate.get("search_note"),
+            "origin": candidate.get("origin"),
+            "destination": candidate.get("destination"),
+            "depart_date": candidate.get("depart_date"),
+            "return_date": candidate.get("return_date"),
+            "reason": reason,
+            "offers": len(offers)
+        })
+
+        for offer in offers:
+            copy = dict(offer)
+            copy["search_note"] = candidate.get("search_note", "Exact trip")
+            copy["origin"] = candidate.get("origin")
+            copy["destination"] = candidate.get("destination")
+            copy["depart_date"] = candidate.get("depart_date")
+            copy["return_date"] = candidate.get("return_date")
+            copy["trip_type"] = candidate.get("trip_type")
+            all_offers.append(copy)
+
+    if all_offers:
+        return all_offers, "ok", reasons
+
+    return [], reasons[0]["reason"] if reasons else "no_candidates", reasons
+
 def fallback_details(trip, reason):
     route = f"{trip['origin']} to {trip['destination']}"
 
@@ -1086,6 +1193,16 @@ def tradeoff_line(best, cheapest, fastest):
 
     return "This is the best value after balancing fare, travel time, stops, and your stated preferences."
 
+def route_line(offer):
+    route = ""
+    if offer.get("origin") and offer.get("destination"):
+        route = f"{offer['origin']} to {offer['destination']}"
+    if offer.get("depart_date"):
+        route = f"{route} on {offer['depart_date']}".strip()
+    if offer.get("return_date"):
+        route = f"{route}, return {offer['return_date']}".strip()
+    return route or "selected route"
+
 def cards_from_offers(offers, trip):
     ranked, best, cheapest, fastest = analyze_offers(offers, trip)
     tradeoff = tradeoff_line(best, cheapest, fastest)
@@ -1097,7 +1214,7 @@ def cards_from_offers(offers, trip):
             "status": f"{best['airline']} - {best['stops']} stop(s)",
             "goal": "Book the strongest overall value",
             "risk": "Fare can expire or baggage rules may change",
-            "explanation": f"{tradeoff} Flight time: {format_minutes(best.get('duration_minutes'))}."
+            "explanation": f"{tradeoff} Flight time: {format_minutes(best.get('duration_minutes'))}. Search: {best.get('search_note', 'Exact trip')} - {route_line(best)}."
         }
     ]
 
@@ -1117,7 +1234,7 @@ def cards_from_offers(offers, trip):
             "status": f"{offer['stops']} stop(s)",
             "goal": offer["airline"],
             "risk": "Offer expires",
-            "explanation": f"Flight time: {format_minutes(offer.get('duration_minutes'))}. Offer expires at {offer.get('expires_at') or 'provider-controlled time'}."
+            "explanation": f"Flight time: {format_minutes(offer.get('duration_minutes'))}. Search: {offer.get('search_note', 'Exact trip')} - {route_line(offer)}. Offer expires at {offer.get('expires_at') or 'provider-controlled time'}."
         })
 
         if len(cards) == 3:
@@ -1188,12 +1305,13 @@ def chat():
         search_trip["return_date"]
     )
 
-    offers, reason = fetch_duffel_offers(search_trip)
+    offers, reason, deal_space = fetch_deal_space_offers(search_trip)
     if offers:
         cards = cards_from_offers(offers, search_trip)
     else:
         cards = fallback_cards(search_trip, links, reason)
 
+    search_trip["deal_space"] = deal_space
     strategy = ai_strategy(search_trip, offers, reason)
     plan = trip_plan_line(search_trip)
     reply = ai_chat_reply(message, search_trip, offers, cards, links, reason, plan, strategy, history)
@@ -1207,6 +1325,7 @@ def chat():
         "strategy": strategy,
         "cards": cards,
         "offers": offers,
+        "deal_space": deal_space,
         "links": links,
         "reason": reason
     })
