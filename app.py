@@ -24,7 +24,7 @@ DUFFEL_ACCESS_TOKEN = os.getenv("DUFFEL_ACCESS_TOKEN", "")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY and OpenAI else None
 
 AIRPORT_MAP = {
-    "egypt": "CAI", "cairo": "CAI",
+    "egypt": "CAI", "eygpt": "CAI", "egpyt": "CAI", "egyptt": "CAI", "cairo": "CAI",
     "new york": "JFK", "nyc": "JFK",
     "manhattan": "JFK", "brooklyn": "JFK",
     "lga": "LGA", "jfk": "JFK", "ewr": "EWR",
@@ -62,6 +62,8 @@ def normalize_airport(value):
 
     key = re.sub(r"[^a-z0-9 ]+", " ", value.lower())
     key = re.sub(r"\s+", " ", key).strip()
+    key = re.sub(r"^(?:go|going|fly|flying|travel|traveling|visit|visiting)\s+(?:to\s+)?", "", key).strip()
+    key = re.sub(r"^(?:to|for)\s+", "", key).strip()
     if key in AIRPORT_MAP:
         return AIRPORT_MAP[key]
 
@@ -309,6 +311,12 @@ def is_non_place_phrase(value):
     value = (value or "").lower()
     return any(term in value for term in ("week", "day", "night", "vacation", "vecation", "adult", "price", "budget"))
 
+def is_missing_info_question(text):
+    lower = (text or "").lower()
+    if "missing" not in lower and "need" not in lower:
+        return False
+    return any(term in lower for term in ("what info", "what information", "what am i missing", "what im missing", "what i'm missing", "what do you need"))
+
 def detect_world_cup_texas_request(text):
     lower = (text or "").lower()
     if "world cup" not in lower or "texas" not in lower:
@@ -348,11 +356,18 @@ def rule_extract_trip_details(message):
     lower = text.lower()
     updates = {}
 
+    if is_missing_info_question(lower):
+        return {}
+
     route_stop = r"(?:[.,]|$|\s+\d|\s+jan|\s+january|\s+feb|\s+february|\s+mar|\s+march|\s+apr|\s+april|\s+may|\s+jun|\s+june|\s+jul|\s+july|\s+aug|\s+august|\s+sep|\s+sept|\s+september|\s+oct|\s+october|\s+nov|\s+november|\s+dec|\s+december|\s+on|\s+next|\s+in|\s+with|\s+and|\s+come\s+back|\s+return)"
     reverse_route_match = re.search(rf"\b(?:visit|go to|want|need)\s+([a-zA-Z .]+?)\s+from\s+([a-zA-Z .]+?){route_stop}", lower)
     if reverse_route_match:
         updates["destination"] = normalize_airport(reverse_route_match.group(1))
         updates["origin"] = normalize_airport(reverse_route_match.group(2))
+
+    simple_destination = re.search(rf"\b(?:go|fly|travel|visit|going|flying|traveling|visiting)\s+to\s+([a-zA-Z .]+?){route_stop}", lower)
+    if simple_destination and not is_non_place_phrase(simple_destination.group(1)):
+        updates["destination"] = normalize_airport(simple_destination.group(1))
 
     route_match = re.search(rf"\bfrom\s+([a-zA-Z .]+?)\s+(?:to|for)\s+([a-zA-Z .]+?){route_stop}", lower)
     if route_match:
@@ -461,6 +476,7 @@ def ai_extract_trip_details(message, current_trip, history):
                         "Use these keys: origin, destination, trip_type, depart_date, return_date, "
                         "date_window, adults, children, infants, priority, cabin, seat, preference. "
                         "Use IATA airport codes when obvious. London or londen should be LHR. "
+                        "Egypt, eygpt, go to Egypt, or go to eygpt should be CAI. "
                         "If the user says next month/week without an exact day, put that phrase in date_window "
                         "and leave depart_date blank. Leave unknown fields null. Current date: "
                         f"{datetime.now().date().isoformat()}."
@@ -632,6 +648,9 @@ def trip_plan_line(trip):
         f"from {trip.get('depart_date')} to {trip.get('return_date')}."
     )
 
+def trip_ready_line(trip):
+    return f"You are not missing any trip details. I have {summarize_chat_trip(trip)}."
+
 def ai_chat_reply(message, trip, offers, cards, links, reason, plan, strategy, history):
     if offers:
         fallback = f"{plan} I found live prices and picked the strongest option: {cards[0]['signal']}. {strategy}".strip()
@@ -682,6 +701,69 @@ def ai_chat_reply(message, trip, offers, cards, links, reason, plan, strategy, h
     except Exception as exc:
         print("AI chat reply fallback:", str(exc), flush=True)
         return fallback
+
+def ai_agent_brain(message, current_trip, history):
+    if not client:
+        return {
+            "reply": "AIFlight's AI engine is not connected right now. Add OPENAI_API_KEY on Render so I can reason through the trip like an agent.",
+            "trip": current_trip,
+            "ready_to_search": False,
+            "missing_fields": ["AI engine connection"]
+        }
+
+    system_prompt = (
+        "You are AIFlight, an AI travel agent built to beat airline pricing AI for clients. "
+        "Your job is limited to flight deals, flight planning, and price strategy. "
+        "You are not a form. Do not use fixed template language like 'I noted...' or 'Send that and I will pull live prices.' "
+        "Talk naturally like a smart travel agent. "
+        "Maintain the structured trip state from the conversation and the current_trip object. "
+        "Convert cities, countries, misspellings, and phrases into IATA airport codes when the intent is clear "
+        "(NYC/New York -> JFK unless user chooses LGA/EWR, Egypt/Eygpt/Cairo -> CAI, Paris -> CDG, London/Londen -> LHR). "
+        "If the user asks what information is missing, answer from current_trip. "
+        "Required before live search: origin IATA, destination IATA, departure date YYYY-MM-DD, trip_type oneway or roundtrip, "
+        "return date if roundtrip, and adults. Cabin defaults to economy. Priority defaults to balanced. "
+        "If a user gives a date range and trip length, choose a sensible departure/return within the range and state the assumption. "
+        "If ready_to_search is false, ask only for the important missing details. "
+        "If ready_to_search is true, do not invent prices; the backend will search live offers. "
+        "Return JSON only with keys: reply, trip, ready_to_search, missing_fields. "
+        "trip keys: origin, destination, trip_type, depart_date, return_date, date_window, adults, children, infants, priority, cabin, seat, preference, event_context."
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps({
+                        "current_date": datetime.now().date().isoformat(),
+                        "current_trip": current_trip,
+                        "recent_history": history[-10:] if isinstance(history, list) else [],
+                        "new_message": message
+                    })
+                }
+            ],
+            max_tokens=700,
+            temperature=0.45
+        )
+        brain = json.loads(response.choices[0].message.content)
+    except Exception as exc:
+        print("AI agent brain fallback:", str(exc), flush=True)
+        return {
+            "reply": "I had trouble thinking through that request. Try saying the route, date, and passengers in one sentence.",
+            "trip": current_trip,
+            "ready_to_search": False,
+            "missing_fields": ["AI response"]
+        }
+
+    return {
+        "reply": str(brain.get("reply") or "").strip(),
+        "trip": coerce_chat_trip(brain.get("trip") or current_trip),
+        "ready_to_search": bool(brain.get("ready_to_search")),
+        "missing_fields": brain.get("missing_fields") if isinstance(brain.get("missing_fields"), list) else []
+    }
 
 
 @app.route("/")
@@ -1081,20 +1163,18 @@ def chat():
         return jsonify({"error": "Message is required."}), 400
 
     current_trip = coerce_chat_trip(data.get("trip") or {})
-    rule_updates = rule_extract_trip_details(message)
-    ai_updates = ai_extract_trip_details(message, current_trip, history)
-    updates = {**rule_updates, **{key: value for key, value in ai_updates.items() if value not in ("", None)}}
-    if rule_updates.get("event_context"):
-        updates.update(rule_updates)
-    trip = merge_trip_updates(current_trip, updates)
+    brain = ai_agent_brain(message, current_trip, history)
+    trip = brain["trip"]
 
     missing = missing_chat_fields(trip)
-    if missing:
+    if missing or not brain["ready_to_search"]:
+        missing_fields = missing or brain["missing_fields"]
+        reply = brain["reply"] or ai_followup_reply(message, trip, missing_fields, history)
         return jsonify({
             "complete": False,
-            "reply": ai_followup_reply(message, trip, missing, history),
+            "reply": reply,
             "trip": trip,
-            "missing": missing,
+            "missing": missing_fields,
             "ai_enabled": bool(client),
             "duffel_enabled": bool(DUFFEL_ACCESS_TOKEN)
         })

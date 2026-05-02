@@ -266,4 +266,3 @@ chatForm.addEventListener("submit", async event => {
 
 setDateMinimums();
 setTripType("oneway");
-appendMessage("assistant", "Tell me the trip in your own words. I will turn it into a flight plan, ask only for what is missing, then show the best live price I can find.");
