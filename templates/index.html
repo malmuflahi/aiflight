@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>AIFlight | Chat Flight AI</title>
-    <meta name="description" content="AIFlight chats with travelers, gathers trip details, and finds the best live flight price.">
+    <title>AIFlight | AI That Beats Airlines</title>
+    <meta name="description" content="Airlines use AI to raise prices. AIFlight uses AI to find the strongest flight price and recommendation.">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -12,39 +12,56 @@
 <header class="hero">
     <nav class="nav">
         <div class="brand">AIFlight</div>
-        <div class="nav-pill">AI Travel Agent</div>
+        <div class="nav-pill">AI vs Airline Pricing</div>
     </nav>
 
     <section class="hero-content">
-        <p class="eyebrow">Powered by chat-first flight AI</p>
-        <h1>Describe the trip. AIFlight asks what matters and finds the price.</h1>
+        <p class="eyebrow">AI price defense</p>
+        <h1>AI that beats airlines</h1>
         <p class="subtitle">
-            No long forms. No thirty-option homework. AIFlight takes notes, fills the missing details, and recommends the strongest live fare.
+            Airlines use AI to raise prices. We use AI to beat them.
         </p>
+        <div class="value-flow" aria-label="AIFlight flow">
+            <div>
+                <span>Proof</span>
+                <strong>Live fares + AI scoring</strong>
+                <p>AIFlight compares price, time, stops, comfort, and tradeoffs before it recommends.</p>
+            </div>
+            <div>
+                <span>Offer</span>
+                <strong>One best flight</strong>
+                <p>You get the strongest option, the price, and the reason. Not thirty tabs to sort yourself.</p>
+            </div>
+            <div>
+                <span>Action</span>
+                <strong>Type the trip</strong>
+                <p>Say it naturally. AIFlight asks only for missing details, then searches live prices.</p>
+            </div>
+        </div>
     </section>
 </header>
 
 <main class="app-shell chat-layout">
     <section class="glass-panel chat-panel">
         <div class="panel-head">
-            <h2>Chat with AIFlight</h2>
-            <p>Tell it the trip in your own words.</p>
+            <h2>Start with one message</h2>
+            <p>Route, dates, budget, comfort, event, or just the idea. AIFlight will handle the rest.</p>
         </div>
 
         <div id="chatLog" class="chat-log" aria-live="polite"></div>
 
         <form id="chatForm" class="chat-form">
-            <textarea id="chatInput" rows="3" placeholder="Example: We need a comfortable trip next month to London. Money is not the biggest concern."></textarea>
+            <textarea id="chatInput" rows="3" placeholder="Example: I want Paris from NYC June 10-20 for one week. Comfort matters more than the cheapest price."></textarea>
             <button id="sendButton" class="primary-action" type="submit">Send</button>
         </form>
 
-        <p class="trust-note">AIFlight will ask for missing dates, passengers, cabin, and route before searching prices.</p>
+        <p class="trust-note">No extra steps. No airline guessing game. One conversation to get the price and the move.</p>
     </section>
 
     <aside class="notes-panel">
         <div class="panel-head compact">
-            <h2>AI notes</h2>
-            <p>What the chat has understood so far.</p>
+            <h2>Trip notes</h2>
+            <p>The details AIFlight is using for the search.</p>
         </div>
         <div id="notesList" class="notes-list"></div>
     </aside>

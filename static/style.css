@@ -14,7 +14,7 @@ body {
     -webkit-font-smoothing: antialiased;
     background:
         radial-gradient(circle at 85% 0%, rgba(56,189,248,.18), transparent 34%),
-        radial-gradient(circle at 0% 30%, rgba(14,165,233,.12), transparent 30%),
+        radial-gradient(circle at 0% 30%, rgba(245,158,11,.10), transparent 30%),
         #020617;
     color: #f8fafc;
 }
@@ -22,12 +22,12 @@ body {
 /* HERO */
 
 .hero {
-    padding: 34px 22px 90px;
+    padding: 30px 22px 70px;
 }
 
 .nav {
     max-width: 1120px;
-    margin: 0 auto 64px;
+    margin: 0 auto 48px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -41,7 +41,7 @@ body {
 
 .nav-pill {
     padding: 9px 14px;
-    border-radius: 999px;
+    border-radius: 8px;
     background: rgba(255,255,255,.07);
     border: 1px solid rgba(255,255,255,.12);
     color: #bae6fd;
@@ -55,13 +55,13 @@ body {
 }
 
 .eyebrow {
-    color: #38bdf8;
+    color: #fbbf24;
     font-weight: 900;
     letter-spacing: .4px;
 }
 
 h1 {
-    font-size: 72px;
+    font-size: 76px;
     line-height: .95;
     letter-spacing: 0;
     margin: 0 0 24px;
@@ -70,16 +70,53 @@ h1 {
 
 .subtitle {
     max-width: 720px;
+    color: #e2e8f0;
+    font-size: 24px;
+    line-height: 1.45;
+    font-weight: 800;
+}
+
+.value-flow {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 34px;
+}
+
+.value-flow div {
+    padding: 18px;
+    border-radius: 8px;
+    background: rgba(255,255,255,.045);
+    border: 1px solid rgba(255,255,255,.10);
+}
+
+.value-flow span {
+    display: block;
+    color: #fbbf24;
+    font-size: 12px;
+    font-weight: 950;
+    letter-spacing: .7px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.value-flow strong {
+    display: block;
+    font-size: 18px;
+    margin-bottom: 8px;
+}
+
+.value-flow p {
     color: #94a3b8;
-    font-size: 20px;
-    line-height: 1.65;
+    line-height: 1.5;
+    margin: 0;
 }
 
 /* APP */
 
 .app-shell {
     max-width: 1120px;
-    margin: -54px auto 80px;
+    margin: -42px auto 80px;
     padding: 0 18px;
 }
 
@@ -102,7 +139,7 @@ h1 {
 
 .panel-head p {
     color: #94a3b8;
-    margin-bottom: 28px;
+    margin: 0 0 22px;
 }
 
 /* FORM */
@@ -120,7 +157,7 @@ form {
 }
 
 .chat-panel {
-    min-height: 620px;
+    min-height: 590px;
 }
 
 .panel-head.compact h2 {
@@ -135,8 +172,8 @@ form {
     display: grid;
     align-content: start;
     gap: 14px;
-    min-height: 360px;
-    max-height: 520px;
+    min-height: 330px;
+    max-height: 500px;
     overflow-y: auto;
     padding: 18px;
     border-radius: 8px;
@@ -406,7 +443,7 @@ textarea {
 .trust-note {
     text-align: center;
     font-size: 14px;
-    color: #64748b;
+    color: #94a3b8;
 }
 
 /* STATUS */
@@ -556,13 +593,11 @@ textarea {
         grid-template-columns: 1fr;
     }
 
+    .value-flow {
+        grid-template-columns: 1fr;
+    }
+
     h1 {
         font-size: 48px;
-    }
-}
-
-@media (max-width: 520px) {
-    h1 {
-        font-size: 44px;
     }
 }

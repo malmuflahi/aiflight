@@ -305,6 +305,10 @@ def is_place_pronoun(value):
     value = re.sub(r"[^a-z]+", "", (value or "").lower())
     return value in ("there", "their", "thier", "thatplace")
 
+def is_non_place_phrase(value):
+    value = (value or "").lower()
+    return any(term in value for term in ("week", "day", "night", "vacation", "vecation", "adult", "price", "budget"))
+
 def detect_world_cup_texas_request(text):
     lower = (text or "").lower()
     if "world cup" not in lower or "texas" not in lower:
@@ -344,7 +348,12 @@ def rule_extract_trip_details(message):
     lower = text.lower()
     updates = {}
 
-    route_stop = r"(?:[.,]|$|\s+on|\s+next|\s+in|\s+with|\s+and|\s+come\s+back|\s+return)"
+    route_stop = r"(?:[.,]|$|\s+\d|\s+jan|\s+january|\s+feb|\s+february|\s+mar|\s+march|\s+apr|\s+april|\s+may|\s+jun|\s+june|\s+jul|\s+july|\s+aug|\s+august|\s+sep|\s+sept|\s+september|\s+oct|\s+october|\s+nov|\s+november|\s+dec|\s+december|\s+on|\s+next|\s+in|\s+with|\s+and|\s+come\s+back|\s+return)"
+    reverse_route_match = re.search(rf"\b(?:visit|go to|want|need)\s+([a-zA-Z .]+?)\s+from\s+([a-zA-Z .]+?){route_stop}", lower)
+    if reverse_route_match:
+        updates["destination"] = normalize_airport(reverse_route_match.group(1))
+        updates["origin"] = normalize_airport(reverse_route_match.group(2))
+
     route_match = re.search(rf"\bfrom\s+([a-zA-Z .]+?)\s+(?:to|for)\s+([a-zA-Z .]+?){route_stop}", lower)
     if route_match:
         updates["origin"] = normalize_airport(route_match.group(1))
@@ -352,7 +361,7 @@ def rule_extract_trip_details(message):
             updates["destination"] = normalize_airport(route_match.group(2))
     else:
         to_match = re.search(rf"\b(?:to|for)\s+([a-zA-Z .]+?){route_stop}", lower)
-        if to_match and not is_place_pronoun(to_match.group(1)):
+        if to_match and not is_place_pronoun(to_match.group(1)) and not is_non_place_phrase(to_match.group(1)):
             updates["destination"] = normalize_airport(to_match.group(1))
 
         from_match = re.search(rf"\bfrom\s+([a-zA-Z .]+?){route_stop}", lower)

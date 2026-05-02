@@ -179,4 +179,4 @@ chatForm.addEventListener("submit", async event => {
 });
 
 renderNotes(tripState);
-appendMessage("assistant", "Tell me the trip you want. I will ask for missing details, then search live fares and show the prices.");
+appendMessage("assistant", "Tell me the trip in your own words. I will turn it into a flight plan, ask only for what is missing, then show the best live price I can find.");
