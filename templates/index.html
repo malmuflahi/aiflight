@@ -1,108 +1,156 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>AIFLight | AI Price Defense</title>
+    <title>AIFlight | Price Defense</title>
+    <meta name="description" content="AIFlight helps travelers compare flight prices, predict fare changes, and choose when to book.">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
 <header class="hero">
-    <nav>
-        <div class="logo">AIFLight</div>
-        <div class="pill">AI vs Airline Pricing</div>
+    <nav class="nav">
+        <div class="brand">AIFlight</div>
+        <div class="nav-pill">AI Price Defense</div>
     </nav>
 
-    <h1>Beat airline price swings before you book.</h1>
-    <p>A premium flight decision engine that helps you choose cheaper, faster, or more comfortable routes.</p>
+    <section class="hero-content">
+        <p class="eyebrow">Your personal fare defense system</p>
+        <h1>Know when to book, when to wait, and when airlines are overcharging.</h1>
+        <p class="subtitle">
+            AIFlight helps you compare smarter, avoid bad layovers, and choose the best time to book — without guessing.
+        </p>
+    </section>
 </header>
 
-<main>
-    <section class="search-card">
-        <h2>Build your flight strategy</h2>
-        <p class="helper">Tap your choices. No confusing forms.</p>
+<main class="app-shell">
+    <section class="glass-panel">
+
+        <div class="panel-head">
+            <h2>Build your flight strategy</h2>
+            <p>Tap your preferences. We’ll create a smarter fare-defense plan.</p>
+        </div>
+
+        <div class="progress">
+            <span></span>
+        </div>
 
         <form id="searchForm">
-            <div class="grid">
-                <input id="origin" value="LGA" placeholder="From: LGA or New York">
-                <input id="destination" value="BOS" placeholder="To: BOS or Boston">
+
+            <div class="step">
+                <span class="step-label">01 · Route</span>
+
+                <div class="route-grid">
+                    <label>From
+                        <input id="origin" value="LGA">
+                    </label>
+
+                    <label>To
+                        <input id="destination" value="BOS">
+                    </label>
+                </div>
             </div>
 
-            <div class="choice-section">
-                <h3>Trip type</h3>
+            <div class="step">
+                <span class="step-label">02 · Trip type</span>
+
                 <div class="choice-grid two">
                     <button type="button" class="choice active" data-group="tripType" data-value="oneway">One way</button>
                     <button type="button" class="choice" data-group="tripType" data-value="roundtrip">Round trip</button>
                 </div>
             </div>
 
-            <div class="grid">
-                <label>Departure date
+            <div class="step date-grid">
+                <label>Departure
                     <input id="departDate" type="date">
                 </label>
-                <label id="returnWrap">Return date
+
+                <label id="returnWrap" style="display:none;">
+                    Return
                     <input id="returnDate" type="date">
                 </label>
             </div>
 
-            <div class="choice-section">
-                <h3>Passengers</h3>
+            <div class="step">
+                <span class="step-label">03 · Passengers</span>
+
                 <div class="passenger-grid">
                     <div class="counter">
                         <span>Adults</span>
-                        <div><button type="button" data-counter="adults" data-action="-">−</button><strong id="adultsValue">1</strong><button type="button" data-counter="adults" data-action="+">+</button></div>
+                        <div>
+                            <button type="button" data-counter="adults" data-action="-">−</button>
+                            <strong id="adultsValue">1</strong>
+                            <button type="button" data-counter="adults" data-action="+">+</button>
+                        </div>
                     </div>
+
                     <div class="counter">
                         <span>Children</span>
-                        <div><button type="button" data-counter="children" data-action="-">−</button><strong id="childrenValue">0</strong><button type="button" data-counter="children" data-action="+">+</button></div>
+                        <div>
+                            <button type="button" data-counter="children" data-action="-">−</button>
+                            <strong id="childrenValue">0</strong>
+                            <button type="button" data-counter="children" data-action="+">+</button>
+                        </div>
                     </div>
+
                     <div class="counter">
                         <span>Infants</span>
-                        <div><button type="button" data-counter="infants" data-action="-">−</button><strong id="infantsValue">0</strong><button type="button" data-counter="infants" data-action="+">+</button></div>
+                        <div>
+                            <button type="button" data-counter="infants" data-action="-">−</button>
+                            <strong id="infantsValue">0</strong>
+                            <button type="button" data-counter="infants" data-action="+">+</button>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <div class="choice-section">
-                <h3>What matters most?</h3>
-                <div class="choice-grid">
-                    <button type="button" class="choice active big" data-group="priority" data-value="balanced">
-                        ⚖️ Best Value
+            <div class="step">
+                <span class="step-label">04 · What matters most?</span>
+
+                <div class="choice-grid premium">
+                    <button type="button" class="choice big active" data-group="priority" data-value="balanced">
+                        <b>Best Value</b>
                         <span>Balance price, time, and stress</span>
                     </button>
+
                     <button type="button" class="choice big" data-group="priority" data-value="cheapest">
-                        💰 Cheapest
-                        <span>Find the lowest price path</span>
+                        <b>Cheapest</b>
+                        <span>Push for the lowest price</span>
                     </button>
+
                     <button type="button" class="choice big" data-group="priority" data-value="fastest">
-                        ⚡ Fastest
+                        <b>Fastest</b>
                         <span>Save time, even if it costs more</span>
                     </button>
+
                     <button type="button" class="choice big" data-group="priority" data-value="comfort">
-                        🛋️ Comfort
-                        <span>Fewer stops and less stress</span>
+                        <b>Low Stress</b>
+                        <span>Fewer stops, smoother travel</span>
                     </button>
                 </div>
             </div>
 
-            <div class="choice-section">
-                <h3>Cabin</h3>
+            <div class="step">
+                <span class="step-label">05 · Cabin</span>
+
                 <div class="choice-grid two">
                     <button type="button" class="choice active" data-group="cabin" data-value="economy">Economy</button>
-                    <button type="button" class="choice" data-group="cabin" data-value="premium">Premium Economy</button>
+                    <button type="button" class="choice" data-group="cabin" data-value="premium">Premium</button>
                     <button type="button" class="choice" data-group="cabin" data-value="business">Business</button>
                     <button type="button" class="choice" data-group="cabin" data-value="first">First</button>
                 </div>
             </div>
 
-            <div class="choice-section">
-                <h3>Seat preference</h3>
+            <div class="step">
+                <span class="step-label">06 · Seat preference</span>
+
                 <div class="choice-grid two">
                     <button type="button" class="choice active" data-group="seat" data-value="none">No preference</button>
                     <button type="button" class="choice" data-group="seat" data-value="window">Window</button>
                     <button type="button" class="choice" data-group="seat" data-value="aisle">Aisle</button>
                 </div>
-                <p class="small-note">Seat availability is confirmed on the booking site.</p>
+
+                <p class="note">Final seat availability confirmed on booking site.</p>
             </div>
 
             <textarea id="preference">I want the cheapest smart option, but I do not want a terrible layover.</textarea>
@@ -112,7 +160,10 @@
             <input type="hidden" id="cabin" value="economy">
             <input type="hidden" id="seat" value="none">
 
-            <button class="submit-btn" type="submit">Run Price Defense</button>
+            <button class="primary-action" type="submit">Defend My Fare</button>
+
+            <p class="trust-note">No booking pressure. Compare first. Decide smarter.</p>
+
         </form>
     </section>
 
