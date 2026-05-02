@@ -9,6 +9,12 @@ const statusBox = document.getElementById("status");
 const strategyBox = document.getElementById("strategy");
 const resultsBox = document.getElementById("results");
 const sendButton = document.getElementById("sendButton");
+const tripOptionButtons = document.querySelectorAll("[data-trip-option]");
+const quickDepartDate = document.getElementById("quickDepartDate");
+const quickReturnDate = document.getElementById("quickReturnDate");
+const quickReturnWrap = document.getElementById("quickReturnWrap");
+
+let selectedTripType = "oneway";
 
 function escapeHTML(value) {
     return String(value ?? "")
@@ -79,6 +85,84 @@ function renderNotes(trip = {}) {
     ].join("");
 }
 
+function setDateMinimums() {
+    const today = new Date().toISOString().slice(0, 10);
+    quickDepartDate.min = today;
+    quickReturnDate.min = today;
+}
+
+function syncDatePickerToTripState() {
+    tripState = {
+        ...tripState,
+        trip_type: selectedTripType
+    };
+
+    if (quickDepartDate.value) {
+        tripState.depart_date = quickDepartDate.value;
+    } else {
+        delete tripState.depart_date;
+    }
+
+    if (selectedTripType === "roundtrip") {
+        if (quickReturnDate.value) {
+            tripState.return_date = quickReturnDate.value;
+        } else {
+            delete tripState.return_date;
+        }
+    } else {
+        delete tripState.return_date;
+    }
+
+    renderNotes(tripState);
+}
+
+function setTripType(nextType) {
+    selectedTripType = nextType;
+
+    tripOptionButtons.forEach(button => {
+        button.classList.toggle("active", button.dataset.tripOption === nextType);
+    });
+
+    quickReturnWrap.classList.toggle("hidden", nextType !== "roundtrip");
+    if (nextType !== "roundtrip") {
+        quickReturnDate.value = "";
+    }
+
+    syncDatePickerToTripState();
+}
+
+function applyTripStateToDatePicker(trip = {}) {
+    selectedTripType = trip.trip_type === "roundtrip" ? "roundtrip" : "oneway";
+
+    tripOptionButtons.forEach(button => {
+        button.classList.toggle("active", button.dataset.tripOption === selectedTripType);
+    });
+
+    quickReturnWrap.classList.toggle("hidden", selectedTripType !== "roundtrip");
+    quickDepartDate.value = trip.depart_date || "";
+    quickReturnDate.value = selectedTripType === "roundtrip" ? (trip.return_date || "") : "";
+
+    if (quickDepartDate.value) {
+        quickReturnDate.min = quickDepartDate.value;
+    }
+}
+
+tripOptionButtons.forEach(button => {
+    button.addEventListener("click", () => setTripType(button.dataset.tripOption));
+});
+
+quickDepartDate.addEventListener("change", () => {
+    if (quickDepartDate.value) {
+        quickReturnDate.min = quickDepartDate.value;
+        if (quickReturnDate.value && quickReturnDate.value < quickDepartDate.value) {
+            quickReturnDate.value = "";
+        }
+    }
+    syncDatePickerToTripState();
+});
+
+quickReturnDate.addEventListener("change", syncDatePickerToTripState);
+
 function renderStrategy(data) {
     const trip = data.trip || {};
     strategyBox.innerHTML = `
@@ -119,6 +203,7 @@ function renderResults(data) {
 }
 
 async function sendChatMessage(message) {
+    syncDatePickerToTripState();
     appendMessage("user", message);
     chatHistory.push({ role: "user", content: message });
 
@@ -146,6 +231,7 @@ async function sendChatMessage(message) {
 
         typing.remove();
         tripState = data.trip || tripState;
+        applyTripStateToDatePicker(tripState);
         renderNotes(tripState);
 
         appendMessage("assistant", data.reply);
@@ -178,5 +264,6 @@ chatForm.addEventListener("submit", async event => {
     await sendChatMessage(message);
 });
 
-renderNotes(tripState);
+setDateMinimums();
+setTripType("oneway");
 appendMessage("assistant", "Tell me the trip in your own words. I will turn it into a flight plan, ask only for what is missing, then show the best live price I can find.");

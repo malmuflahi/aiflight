@@ -50,6 +50,22 @@
 
         <div id="chatLog" class="chat-log" aria-live="polite"></div>
 
+        <div class="date-picker" aria-label="Flight date picker">
+            <div class="trip-toggle" role="group" aria-label="Trip type">
+                <button type="button" class="trip-option active" data-trip-option="oneway">One way</button>
+                <button type="button" class="trip-option" data-trip-option="roundtrip">Round trip</button>
+            </div>
+
+            <div class="calendar-grid">
+                <label>Departure
+                    <input id="quickDepartDate" type="date">
+                </label>
+                <label id="quickReturnWrap" class="return-date hidden">Return
+                    <input id="quickReturnDate" type="date">
+                </label>
+            </div>
+        </div>
+
         <form id="chatForm" class="chat-form">
             <textarea id="chatInput" rows="3" placeholder="Example: I want Paris from NYC June 10-20 for one week. Comfort matters more than the cheapest price."></textarea>
             <button id="sendButton" class="primary-action" type="submit">Send</button>

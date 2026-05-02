@@ -181,6 +181,54 @@ form {
     border: 1px solid rgba(255,255,255,.10);
 }
 
+.date-picker {
+    display: grid;
+    gap: 14px;
+    margin-top: 16px;
+    padding: 16px;
+    border-radius: 8px;
+    background: rgba(15,23,42,.55);
+    border: 1px solid rgba(255,255,255,.10);
+}
+
+.trip-toggle {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.trip-option {
+    padding: 13px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.045);
+    color: #f8fafc;
+    font-size: 15px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.trip-option.active {
+    background: #38bdf8;
+    border-color: #38bdf8;
+    color: #020617;
+}
+
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.calendar-grid label {
+    display: grid;
+    gap: 8px;
+}
+
+.calendar-grid .hidden {
+    display: none;
+}
+
 .chat-message {
     max-width: min(76%, 620px);
     padding: 14px 16px;
@@ -580,6 +628,11 @@ textarea {
     }
 
     .chat-form {
+        grid-template-columns: 1fr;
+    }
+
+    .calendar-grid,
+    .trip-toggle {
         grid-template-columns: 1fr;
     }
 
