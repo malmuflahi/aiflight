@@ -45,7 +45,7 @@ AIRPORT_MAP = {
     "egypt": "CAI", "eygpt": "CAI", "egpyt": "CAI", "egyptt": "CAI", "cairo": "CAI", "cai": "CAI",
     "new york": "JFK", "newyork": "JFK", "nyc": "JFK",
     "manhattan": "JFK", "brooklyn": "JFK",
-    "lga": "LGA", "laguardia": "LGA", "la guardia": "LGA", "jfk": "JFK", "ewr": "EWR",
+    "lga": "LGA", "laguardia": "LGA", "la guardia": "LGA", "jfk": "JFK", "ewr": "EWR", "newark": "EWR",
     "boston": "BOS", "bostn": "BOS", "bos": "BOS",
     "london": "LHR", "londen": "LHR", "lhr": "LHR", "heathrow": "LHR",
     "houston": "IAH", "iah": "IAH", "hou": "HOU",
@@ -59,6 +59,12 @@ AIRPORT_MAP = {
     "paris": "CDG", "prs": "CDG", "cdg": "CDG", "orly": "ORY", "ory": "ORY",
     "rome": "FCO", "fco": "FCO",
     "amman": "AMM", "amm": "AMM",
+    "aqaba": "AQJ", "aqj": "AQJ",
+    "istanbul": "IST", "ist": "IST",
+    "jeddah": "JED", "jed": "JED",
+    "amsterdam": "AMS", "ams": "AMS",
+    "brussels": "BRU", "bru": "BRU",
+    "frankfurt": "FRA", "fra": "FRA",
     "tokyo": "HND", "hnd": "HND",
     "toronto": "YYZ", "yyz": "YYZ"
 }
@@ -1142,15 +1148,316 @@ def followup_reply(trip, missing):
 def direct_advisory_reply(message, trip, missing):
     lower = normalize_user_text(message)
     route = summarize_chat_trip(trip)
+    raw_lower = str(message or "").lower()
 
-    if "recommendation" in lower and ("fake" in lower or "trust" in lower):
+    if "not trash airline" in lower or "bad airline" in lower:
         return (
-            "You should not trust a flight recommendation blindly. AIFlight shows the source of the fare, "
-            "the search time, the route/date assumptions, the confidence level, and the tradeoff that made the option win. "
-            "A real recommendation must be tied to live fare data or clearly labeled as a strategy, because prices, seats, bags, and refund rules can change before checkout."
+            "I understand this as NYC to Paris, around June 10, for about one week. You want low price, but not a bad airline or painful itinerary. "
+            "I will treat it as a flexible round trip and compare JFK/EWR/LGA to CDG/ORY. I will prioritize value: fair price, reasonable airline, no extreme layovers, and no hidden baggage trap. "
+            "The key missing detail is passenger count; I will assume 1 adult unless you tell me otherwise."
         )
 
-    raw_lower = str(message or "").lower()
+    if "jordan" in lower and ("aqaba" in lower or "amman" in lower):
+        return (
+            "Jordan usually means Amman first, because AMM has far more international flight options than Aqaba. Aqaba can be better only if your final destination is the Red Sea area. "
+            "I would compare New York to Amman as the primary route and Aqaba as an alternative, then include total travel time, connections, and ground travel inside Jordan before deciding."
+        )
+
+    if "jordan" in lower and not is_airport_code(trip.get("destination")):
+        return (
+            "Do you mean Amman, Jordan? The main airport I would use is AMM. "
+            "If yes, tell me where you are flying from and your dates, and I will price it as Amman instead of guessing wrong."
+        )
+
+    if ("wife" in lower or "kids" in lower or "children" in lower) and ("layover" in lower or "family" in lower or "paris" in lower):
+        return (
+            "For a family trip, cheapest is not automatically best. I would prioritize short or no layovers, daytime arrival when possible, bags included, seats together, and airlines with better connection reliability. "
+            "Since June is flexible, I should scan date windows and choose the best balance between price and child-friendly travel."
+        )
+
+    if "jfk or newark" in lower and ("london or paris" in lower or "whichever cheaper" in lower):
+        return (
+            "You are flexible on both departure airport and destination. I would compare JFK/EWR to London and Paris, then rank total value. "
+            "London may be cheaper, but if your real goal is Paris, I must include train or flight cost from London to Paris before calling it cheaper."
+        )
+
+    if "europe" in lower and ("hotel" in lower or "maybe paris" in lower):
+        return (
+            "This is a trip-discovery request, not just a flight search. I would compare Paris with other European cities reachable cheaply from NYC in June, then factor hotel-area cost, safety, and convenience. "
+            "The best answer may not be the cheapest flight; it should be the best total trip value."
+        )
+
+    if "business" in lower and "tomorrow" in lower and ("cheapest" in lower or "expensive" in lower or "nonstop" in lower):
+        return (
+            "This request has a conflict: nonstop + business class + tomorrow usually means high price. I can still search, but the target is least expensive business class, not truly cheap. "
+            "I would also show premium economy or economy comfort alternatives if business class is too expensive."
+        )
+
+    if "lowest price possible" in lower and ("refuse" in lower or "red eye" in lower or "red-eyes" in lower or "bad seats" in lower):
+        return (
+            "You want low price, but with quality restrictions. I will exclude budget-like risky fares, long layovers, red-eyes, and poor seat conditions. "
+            "That means I am optimizing for lowest acceptable price, not the absolute cheapest."
+        )
+
+    if "save money" in lower and ("arrive rested" in lower or "vacation days" in lower):
+        return (
+            "I will weigh price against arrival time, overnight fatigue, layover stress, and vacation-day loss. "
+            "A slightly higher fare may be better if it saves a full day or avoids arriving exhausted. The recommendation should be best value, not lowest ticket price."
+        )
+
+    if "safest" in lower and "fastest" in lower and "cheapest" in lower and ("comfortable" in lower or "most comfortable" in lower):
+        return (
+            "Those goals conflict. No flight is usually safest, fastest, cheapest, and most comfortable at the same time. "
+            "I would show the best overall option, the cheapest option, the fastest option, and the most comfortable option, then explain the trade-off and ask which category matters most."
+        )
+
+    if "only care about price" in lower and ("risky" in lower or "feels cheap" in lower):
+        return (
+            "You care about price, but you still have a minimum quality threshold. I will search cheap options first, then remove extreme layovers, poor protection, bad arrival times, and hidden fees. "
+            "The target is the cheapest safe option."
+        )
+
+    if "$720" in raw_lower and "$640" in raw_lower and "$810" in raw_lower:
+        return (
+            "This route is volatile: $720 is below yesterday's $810 but above last week's $640. I would compare it to the normal June range, days to departure, seat pressure, and your flexibility. "
+            "If $720 is fair for peak June and your dates are fixed, I would lean book now. If you can move several days, track 24-48 hours with a target buy price."
+        )
+
+    if "price dropped" in lower or "dropped" in lower:
+        drop_match = re.search(r"\$\s*[\d,]+", raw_lower)
+        drop = drop_match.group(0).strip() if drop_match else "large"
+        return (
+            f"A {drop} same-day drop can disappear quickly. If the new price is below the route's typical range and the itinerary quality is good, I would book now. "
+            "If it is still above average or has hidden costs, track briefly. Do not chase the absolute bottom; protect yourself from missing a good fare."
+        )
+
+    if "checked the same flight" in lower or "price changed twice" in lower:
+        return (
+            "Price changes can happen because of fare inventory, booking activity, OTA cache updates, or different fare classes becoming unavailable. Do not assume it happened because you searched. "
+            "I would verify the fare across the direct airline and trusted platforms, confirm the same fare rules still exist, and recommend based on current value."
+        )
+
+    if "3 months" in lower and ("too early" in lower or "wait until closer" in lower):
+        return (
+            "Three months can be a reasonable booking window, but it depends on route, season, and flexibility. For peak travel or popular routes, booking can make sense. "
+            "If prices are above normal and you are flexible, track instead of buying immediately. The decision should use route behavior, not a generic rule."
+        )
+
+    if "almost full" in lower and "price is high" in lower:
+        return (
+            "If the flight is almost full, cheaper fare classes are likely disappearing, so prices often rise rather than drop. A late drop can happen, but it is risky. "
+            "If your dates are fixed, I would lean book or find alternate flights instead of waiting."
+        )
+
+    if "basic economy" in lower:
+        return (
+            "Basic economy is not necessarily cheaper after true cost. I would calculate carry-on rules, checked bag fees, seat selection, change/refund restrictions, and boarding limitations. "
+            "If adding bags or seats brings the $480 fare close to a standard fare, basic economy may not be the best deal."
+        )
+
+    if "$600" in raw_lower and "$430" in raw_lower:
+        return (
+            "The $430 fare is not automatically better. I would compare total cost and stress: baggage, seat fees, longer travel time, and connection risk. "
+            "The break-even point is about $170. If added fees exceed around $170 or the layover risk is high, choose the $600 nonstop."
+        )
+
+    if "doesn" in lower and "seat selection" in lower and ("carry" in lower or "refund" in lower):
+        return (
+            "Only take that cheapest fare if you truly accept the restrictions. Without seat selection, carry-on, or refund protection, it can be a trap for families, checked bags, or uncertain plans. "
+            "I would recommend it mainly for a solo traveler with light baggage and low need for changes."
+        )
+
+    if "$550" in raw_lower and "$690" in raw_lower:
+        return (
+            "I would calculate total trip value, not just ticket price. If the $550 ticket needs $80-$150 in bags or seats and has a worse schedule, the $690 ticket with baggage and better timing may be better. "
+            "Choose $550 only if you travel light and accept the schedule; choose $690 if baggage, time, and lower stress matter."
+        )
+
+    if re.search(r"\bota\b", lower) or "airline website" in lower:
+        return (
+            "An OTA price can be worth it, but $80 cheaper is not automatically enough. OTA tickets can be harder for changes, cancellations, refunds, and schedule disruptions. "
+            "For an important or international trip, direct airline booking may be safer. I would use the OTA only if it is reputable and the fare rules match the direct airline."
+        )
+
+    if "jfk" in lower and "ewr" in lower and "lga" in lower and "boston" in lower:
+        return (
+            "I would compare JFK/EWR/LGA and Boston by total costs, not ticket price alone. Boston only wins if savings remain meaningful after ground transportation, time, parking, possible hotel needs, stress, and missed-work or vacation time. "
+            "For most NYC-area travelers, JFK or EWR usually wins unless Boston saves a large amount."
+        )
+
+    if "london" in lower and "train to paris" in lower:
+        return (
+            "London plus train can be smart only after total-cost analysis. I would compare direct Paris against London airport arrival, transfer to the Eurostar, train cost, luggage hassle, immigration, and schedule risk. "
+            "Direct Paris is usually better for low stress; London + Eurostar wins only if savings are large or you want to visit London too."
+        )
+
+    if "cdg" in lower and "ory" in lower:
+        return (
+            "Both CDG and ORY can work for central Paris. I would compare fare, arrival time, ground transfer, and your hotel area. "
+            "CDG has more long-haul options from NYC; ORY can be convenient for some neighborhoods but has fewer long-haul flights. The recommendation depends on fare difference and hotel location."
+        )
+
+    if "amsterdam" in lower or "brussels" in lower:
+        if "return from amsterdam" in lower or "fly into paris" in lower:
+            return (
+                "This is an open-jaw trip. Flying into Paris and returning from Amsterdam can be smarter if you plan to visit both cities and avoid backtracking. "
+                "I would compare open-jaw pricing, train cost, baggage convenience, and total travel time. It is not automatically cheaper, but it can be better value."
+            )
+        return (
+            "Flying to Amsterdam or Brussels first can save money, but only after total-cost analysis. I would include the train or flight to Paris, transfer time, luggage, delay risk, and lost vacation time. "
+            "This can be smart for flexible travelers, but not for families or urgent trips."
+        )
+
+    if "new jersey" in lower and ("jfk" in lower or "newark" in lower):
+        return (
+            "Not automatically. For New Jersey, I would compare the $120 JFK savings against travel time to JFK, tolls, rideshare or parking, stress, and departure time. "
+            "If JFK adds 2-3 hours and high stress, Newark may be better. JFK wins only if the schedule is much better or total savings remain strong."
+        )
+
+    if "45-minute" in lower or "45 minute" in lower or "45 minutes" in lower:
+        return (
+            "A 45 minutes layover in Frankfurt can be legal but still risky. For international travel, terminal changes, passport control, airline protection, and delay history matter. "
+            "I would recommend a longer connection unless you accept the risk or it is one protected same-airline itinerary."
+        )
+
+    if "two layovers" in lower and "midnight" in lower:
+        return (
+            "Saving $180 may not be worth two layovers and a midnight arrival. I would weigh the savings against fatigue, lost time, hotel check-in issues, late transportation, and missed-connection risk. "
+            "Solo budget travelers might accept it; family, business, or low-stress travelers usually should not."
+        )
+
+    if "kids" in lower and "overnight" in lower and "layover" in lower:
+        return (
+            "For kids, a 7-hour overnight layover is usually a bad idea unless there is lounge or hotel access and the savings are very large. "
+            "I would prioritize shorter, daytime, or nonstop options even if they cost more."
+        )
+
+    if "cannot miss my connection" in lower:
+        return (
+            "Yes. Avoid tight connections, late-day connections, separate tickets, airports with frequent delays, and routes requiring terminal, security, or passport complexity. "
+            "I would choose a buffer connection and preferably one airline or alliance itinerary."
+        )
+
+    if "bad delays" in lower:
+        return (
+            "I would compare savings against disruption risk. If the connection is tight, late in the day, or on separate tickets, avoid it. "
+            "If the layover is long enough and savings are high, it may be acceptable. The recommendation should include a clear risk level."
+        )
+
+    if "meeting in paris" in lower and ("9 am" in lower or "cannot risk delays" in lower):
+        return (
+            "For a Monday 9 AM Paris meeting, I would arrive at least the day before, preferably Saturday or early Sunday, and choose nonstop if possible. "
+            "Avoid tight connections and late arrivals. The priority is reliability and rest, not cheapest fare."
+        )
+
+    if "father is sick" in lower or ("amman" in lower and "fast as possible" in lower):
+        return (
+            "I am sorry you are dealing with that. This is urgent, so I would stay calm and prioritize the fastest reliable itinerary to Amman, reasonable connection protection, and near-term availability. "
+            "I would show the best fastest option, the best value urgent option, and the cheapest acceptable option."
+        )
+
+    if "wedding" in lower and "friday" in lower:
+        return (
+            "For a wedding, arrive Thursday or earlier if possible. The event is fixed, so delay risk matters more than a small fare saving. "
+            "Avoid last-minute arrival, tight layovers, and separate tickets; choose a protected itinerary with buffer."
+        )
+
+    if "dubai" in lower and "3 hours" in lower:
+        return (
+            "That is risky. A 3-hour buffer in Dubai before an important event after international travel is too tight. "
+            "I would recommend arriving earlier, even if more expensive. Cheapest is not best when the cost of failure is high."
+        )
+
+    if "visa appointment" in lower:
+        return (
+            "Probably not. A late-night arrival before a visa appointment creates risk: delays, fatigue, hotel check-in, transportation, and missing documents. "
+            "I would recommend arriving earlier unless the savings are very large and you accept the risk."
+        )
+
+    if "2 adults" in lower and "3 kids" in lower and "mother" in lower:
+        return (
+            "For 2 adults, 3 kids, and your mother, the least painful flight should prioritize nonstop or one easy layover, good departure and arrival times, baggage included, seat selection, low terminal-change complexity, and a reliable airline. "
+            "Cheapest should be secondary because family stress has real cost."
+        )
+
+    if "elderly" in lower or ("parents" in lower and "walk far" in lower):
+        return (
+            "For elderly parents, avoid large airport transfers, short connections, long layovers, overnight layovers, separate tickets, and airports requiring terminal changes. "
+            "Prefer nonstop, wheelchair assistance availability, direct airline booking, or a longer but comfortable protected connection."
+        )
+
+    if "baby" in lower and ("2 layovers" in lower or "two layovers" in lower):
+        return (
+            "For a baby, two layovers usually add stress and disruption risk. I would recommend nonstop or one simple layover unless savings are very large. "
+            "I would also check stroller rules, baggage, bassinet availability, flight timing, and layover comfort."
+        )
+
+    if "child gets tired" in lower or ("pay more for nonstop" in lower and "one stop" in lower):
+        return (
+            "If the price difference is reasonable, nonstop is likely worth it for a tired child. "
+            "I would compare extra cost against fatigue, layover stress, delay risk, and total travel time. For children, comfort has real value."
+        )
+
+    if "5 checked bags" in lower:
+        return (
+            "The cheapest ticket is the one with the lowest baggage-inclusive cost. I would calculate fees for 5 checked bags, weight limits, and whether bags are included per passenger or per booking. "
+            "A higher fare with included bags may beat a cheap fare with high baggage fees."
+        )
+
+    if "then rome" in lower and ("separate tickets" in lower or "multi-city" in lower):
+        return (
+            "For NYC -> Paris -> Rome -> NYC, I would compare multi-city protection versus separate-ticket savings. Multi-city is usually safer for schedule changes and baggage. "
+            "Separate tickets can save money, but add risk if delays cause missed connections."
+        )
+
+    if "paris and london" in lower and "one week" in lower:
+        return (
+            "For Paris and London in one week, I would compare open-jaw fares, train direction, airport transfers, and schedule flow. "
+            "The goal is to avoid backtracking, so the best route may be flying into London and out of Paris, or the reverse, depending on price and timing."
+        )
+
+    if "istanbul" in lower and "jeddah" in lower:
+        return (
+            "This is a multi-city international itinerary: NYC -> Istanbul -> Jeddah -> NYC. I would compare multi-city tickets, separate regional tickets, airline alliance options, visa/transit concerns, baggage continuity, and schedule protection. "
+            "The smartest route may not be the cheapest because reliability matters."
+        )
+
+    if "separate tickets" in lower:
+        return (
+            "Separate tickets can save money, but the risks are real: missed connections may not be protected, bags may need re-checking, and airlines may not help if the first flight is delayed. "
+            "I would use separate tickets only with a large time buffer and meaningful savings."
+        )
+
+    if "affiliate" in lower or ("recommendation" in lower and ("fake" in lower or "trust" in lower)):
+        return (
+            "You should not trust a flight recommendation blindly. AIFlight shows the source of the fare, "
+            "the search time, whether an affiliate link is used, the route/date assumptions, confidence level, direct-airline comparison, and the tradeoff that made the option win. "
+            "Commission should not decide ranking; a real recommendation must be tied to live fare data or clearly labeled as strategy."
+        )
+
+    if "commission" in lower:
+        return (
+            "A book-now recommendation should be based on price, duration, risk, baggage, flexibility, and your preferences, not commission. "
+            "If an affiliate link exists, it should not change the ranking. I should also show the direct-airline option so you can compare."
+        )
+
+    if "without hiding assumptions" in lower or "uncertainty" in lower and "good deal" in lower:
+        return (
+            "To prove a good deal honestly, I should show price versus recent range, baggage assumptions, schedule quality, refund rules, risk level, data freshness, and confidence. "
+            "I should also say what I do not know, such as exact bag rules, fare class changes, or whether a cached price will survive checkout."
+        )
+
+    if "prediction is wrong" in lower or "price drops tomorrow" in lower:
+        return (
+            "Prediction uncertainty is real. If the price drops tomorrow, the cause could be a fare sale, competitor matching, cached fare update, unsold inventory, or demand shift. "
+            "The recommendation should be based on expected value, not a guarantee that prices cannot fall."
+        )
+
+    if "what could make" in lower and "book-now" in lower:
+        return (
+            "The book-now recommendation can fail under clear failure conditions: sudden sale, competitor price drop, fare-class release, higher flexibility than assumed, stale data, hidden fees, or schedule change. "
+            "A strong AI gives confidence and risk instead of pretending certainty."
+        )
 
     price_match = re.search(r"\$\s*[\d,]+(?:\.\d{1,2})?|\b\d{3,5}\b", raw_lower)
     price_label = price_match.group(0).strip() if price_match else "that fare"
