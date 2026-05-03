@@ -7,20 +7,24 @@ AIFlight is moving from a simple flight search tool into a personal travel decis
 1. User
 2. Web App
 3. API Gateway
-4. Trip Orchestrator
-5. Flight Data Platform
-6. Data Quality + Normalization
-7. Feature Engine
-8. AI / ML Intelligence Layer
-9. Decision Engine
-10. LLM Explanation Layer
-11. Results Experience
-12. Feedback + Learning Loop
-13. Monitoring / Evals / Safety
+4. AI Brain Loop
+5. Trip Orchestrator
+6. Flight Data Platform
+7. Data Quality + Normalization
+8. Feature Engine
+9. AI / ML Intelligence Layer
+10. Decision Engine
+11. LLM Explanation Layer
+12. Results Experience
+13. Feedback + Learning Loop
+14. Monitoring / Evals / Safety
 
 ## Implemented Now
 
 - API gateway: JSON validation, rate limits, basic abuse checks, security headers.
+- AI brain loop: perceive, understand, build context, decide, act, self-evaluate, refine, then respond.
+- World model: stores current task, user preferences, known constraints, retrieved context, and confidence before search.
+- Assumption guard: unsupported model guesses, especially invented dates and passenger counts, are removed before action.
 - Trip orchestrator: one backend path coordinates intent, provider search, scoring, explanation, and UI response.
 - Flight data platform: Duffel live fares plus fallback links; provider registry is ready for Travelpayouts and future GDS/direct airline APIs.
 - Provider execution: deal-space searches run with retries and parallel workers.

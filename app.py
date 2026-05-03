@@ -94,6 +94,13 @@ DAY_WORDS = {
     "seven": 7
 }
 
+NUMBER_WORDS = {
+    **DAY_WORDS,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10
+}
+
 PRICE_OBSERVATIONS = []
 MAX_PRICE_OBSERVATIONS = 250
 FEEDBACK_EVENTS = []
@@ -103,6 +110,7 @@ RATE_LIMIT_BUCKETS = defaultdict(deque)
 
 PLATFORM_LAYERS = [
     "api_gateway",
+    "ai_brain_loop",
     "trip_orchestrator",
     "flight_data_platform",
     "data_quality_normalization",
@@ -142,6 +150,11 @@ EVAL_CASES = [
         "name": "london_from_boston",
         "message": "I want to visit London from Boston July 5 2026 return July 12 2026, 2 adults, cheapest economy.",
         "expected": {"origin": "BOS", "destination": "LHR", "trip_type": "roundtrip"}
+    },
+    {
+        "name": "la_week_two_friends",
+        "message": "I want to go to la for one week with two friends, comfort",
+        "expected": {"destination": "LAX", "trip_type": "roundtrip", "trip_duration_days": 7, "adults": 3, "priority": "comfort"}
     }
 ]
 
@@ -313,6 +326,7 @@ def blank_chat_trip():
         "depart_date": "",
         "return_date": "",
         "date_window": "",
+        "trip_duration_days": None,
         "adults": None,
         "children": 0,
         "infants": 0,
@@ -343,6 +357,7 @@ def coerce_chat_trip(value):
     trip["seat"] = normalize_seat(trip.get("seat", "none")) or "none"
     trip["preference"] = str(trip.get("preference") or "").strip()
     trip["date_window"] = str(trip.get("date_window") or "").strip()
+    trip["trip_duration_days"] = coerce_optional_count(trip.get("trip_duration_days"), default=None, minimum=1)
     trip["event_context"] = trip.get("event_context") if isinstance(trip.get("event_context"), dict) else {}
     return trip
 
@@ -504,6 +519,47 @@ def parse_flexible_date_range(text):
         "date_window": f"{start.strftime('%b')} {start.day}-{end.day} flexible"
     }
 
+def parse_number_token(value, default=None):
+    value = str(value or "").lower().strip()
+    if value in NUMBER_WORDS:
+        return NUMBER_WORDS[value]
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+def parse_trip_duration_days(text):
+    lower = (text or "").lower()
+    if "one week" in lower or "1 week" in lower or "a week" in lower:
+        return 7
+
+    match = re.search(r"\b(?:for|stay|staying)\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s*(?:day|days|night|nights)\b", lower)
+    if match:
+        return max(1, min(30, parse_number_token(match.group(1), 0)))
+
+    return None
+
+def has_date_evidence(text):
+    lower = (text or "").lower()
+    return bool(parse_chat_date(lower) or parse_flexible_date_range(lower) or detect_date_window(lower))
+
+def has_passenger_evidence(text):
+    lower = (text or "").lower()
+    return bool(re.search(r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:adult|adults|passenger|passengers|people|person|traveler|travelers|friend|friends)\b", lower)) or any(
+        phrase in lower for phrase in ("solo", "alone", "just me", "with my wife", "with my husband", "my partner")
+    )
+
+def companion_adult_count(text):
+    lower = (text or "").lower()
+    match = re.search(r"\bwith\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:friend|friends|adult|adults|people|traveler|travelers)\b", lower)
+    if not match:
+        return None
+
+    companions = parse_number_token(match.group(1), 0)
+    if companions <= 0:
+        return None
+    return min(9, companions + 1)
+
 def detect_date_window(text):
     text = (text or "").lower()
     if "next month" in text:
@@ -590,7 +646,7 @@ def rule_extract_trip_details(message):
     if is_missing_info_question(lower):
         return {}
 
-    route_stop = r"(?:[.,]|$|\s+\d|\s+jan|\s+january|\s+feb|\s+february|\s+mar|\s+march|\s+apr|\s+april|\s+may|\s+jun|\s+june|\s+jul|\s+july|\s+aug|\s+august|\s+sep|\s+sept|\s+september|\s+oct|\s+october|\s+nov|\s+november|\s+dec|\s+december|\s+on|\s+next|\s+in|\s+with|\s+and|\s+come\s+back|\s+return)"
+    route_stop = r"(?:[.,]|$|\s+\d|\s+jan|\s+january|\s+feb|\s+february|\s+mar|\s+march|\s+apr|\s+april|\s+may|\s+jun|\s+june|\s+jul|\s+july|\s+aug|\s+august|\s+sep|\s+sept|\s+september|\s+oct|\s+october|\s+nov|\s+november|\s+dec|\s+december|\s+on|\s+next|\s+in|\s+with|\s+for|\s+and|\s+come\s+back|\s+return)"
     reverse_route_match = re.search(rf"\b(?:visit|go to|want|need)\s+([a-zA-Z .]+?)\s+from\s+([a-zA-Z .]+?){route_stop}", lower)
     if reverse_route_match:
         updates["destination"] = normalize_airport(reverse_route_match.group(1))
@@ -653,12 +709,26 @@ def rule_extract_trip_details(message):
         if window:
             updates["date_window"] = window
 
-    adult_match = re.search(r"\b(\d+)\s+(?:adult|adults|passenger|passengers|people|person|traveler|travelers)\b", lower)
+    duration_days = parse_trip_duration_days(lower)
+    if duration_days:
+        updates["trip_duration_days"] = duration_days
+        updates["trip_type"] = "roundtrip"
+        if updates.get("depart_date") and not updates.get("return_date"):
+            updates["return_date"] = shift_date(updates["depart_date"], duration_days)
+
+    adult_match = re.search(r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:adult|adults|passenger|passengers|people|person|traveler|travelers)\b", lower)
     child_match = re.search(r"\b(\d+)\s+(?:child|children|kid|kids)\b", lower)
     infant_match = re.search(r"\b(\d+)\s+(?:infant|infants|baby|babies)\b", lower)
-    if adult_match:
-        updates["adults"] = int(adult_match.group(1))
-    elif "solo" in lower or "alone" in lower or "just me" in lower or re.search(r"\bi\s+(?:want|need|am|will)\b", lower):
+    friend_total = companion_adult_count(lower)
+    if friend_total:
+        updates["adults"] = friend_total
+    elif adult_match:
+        updates["adults"] = parse_number_token(adult_match.group(1), 1)
+    elif (
+        "friend" not in lower
+        and "friends" not in lower
+        and ("solo" in lower or "alone" in lower or "just me" in lower or re.search(r"\bi\s+(?:want|need|am|will)\b", lower))
+    ):
         updates["adults"] = 1
     if child_match:
         updates["children"] = int(child_match.group(1))
@@ -769,7 +839,11 @@ def missing_chat_fields(trip):
             missing.append("exact departure date")
     if trip.get("trip_type") not in ("oneway", "roundtrip"):
         missing.append("one-way or round trip")
-    if trip.get("trip_type") == "roundtrip" and not is_valid_date(trip.get("return_date")):
+    if (
+        trip.get("trip_type") == "roundtrip"
+        and not is_valid_date(trip.get("return_date"))
+        and not trip.get("trip_duration_days")
+    ):
         missing.append("return date")
     if not trip.get("adults"):
         missing.append("number of adults")
@@ -788,6 +862,8 @@ def summarize_chat_trip(trip):
         parts.append(f"departing {trip['depart_date']}")
     elif trip.get("date_window"):
         parts.append(f"travel window {trip['date_window']}")
+    if trip.get("trip_duration_days"):
+        parts.append(f"{trip['trip_duration_days']} day trip")
     if trip.get("trip_type"):
         parts.append("round trip" if trip["trip_type"] == "roundtrip" else "one way")
     if trip.get("adults"):
@@ -859,18 +935,23 @@ def ai_followup_reply(message, trip, missing, history):
 
 def prepare_chat_search_trip(trip):
     priority = trip.get("priority") or "balanced"
+    return_date = trip.get("return_date", "")
+    if trip.get("trip_type") == "roundtrip" and not return_date and trip.get("trip_duration_days"):
+        return_date = shift_date(trip.get("depart_date"), trip["trip_duration_days"])
+
     return {
         "origin": trip["origin"],
         "destination": trip["destination"],
         "trip_type": trip["trip_type"],
         "depart_date": trip["depart_date"],
-        "return_date": trip.get("return_date", ""),
+        "return_date": return_date,
         "adults": parse_passenger_count(trip.get("adults"), default=1, minimum=1),
         "children": parse_passenger_count(trip.get("children"), default=0),
         "infants": parse_passenger_count(trip.get("infants"), default=0),
         "priority": priority,
         "cabin": trip.get("cabin") or "economy",
         "seat": trip.get("seat") or "none",
+        "trip_duration_days": trip.get("trip_duration_days"),
         "preference": trip.get("preference", ""),
         "event_context": trip.get("event_context", {})
     }
@@ -942,16 +1023,176 @@ def ai_chat_reply(message, trip, offers, cards, links, reason, plan, strategy, h
         print("AI chat reply fallback:", str(exc), flush=True)
         return fallback
 
-def local_agent_brain(message, current_trip):
-    trip = merge_trip_updates(current_trip, rule_extract_trip_details(message))
+def apply_duration_to_trip(trip):
+    trip = coerce_chat_trip(trip)
+    if (
+        trip.get("trip_type") == "roundtrip"
+        and trip.get("trip_duration_days")
+        and is_valid_date(trip.get("depart_date"))
+        and not is_valid_date(trip.get("return_date"))
+    ):
+        trip["return_date"] = shift_date(trip["depart_date"], trip["trip_duration_days"])
+    return coerce_chat_trip(trip)
+
+def build_perception(message, local_updates):
+    fields_seen = sorted([key for key, value in local_updates.items() if value not in ("", None, {}, [])])
+    validation = []
+
+    if not has_date_evidence(message):
+        validation.append("No exact departure date was stated.")
+    if "friend" in message.lower() and "adults" not in local_updates:
+        validation.append("Friends were mentioned without a clear count.")
+
+    confidence = "high" if fields_seen and not validation else "medium" if fields_seen else "low"
+    return {
+        "raw_message": message,
+        "structured_updates": local_updates,
+        "fields_seen": fields_seen,
+        "validation": validation,
+        "confidence": confidence
+    }
+
+def build_world_model(trip, perception, history):
+    return {
+        "user_preferences": {
+            "priority": trip.get("priority") or "balanced",
+            "cabin": trip.get("cabin") or "economy",
+            "seat": trip.get("seat") or "none",
+            "adults": trip.get("adults")
+        },
+        "current_task": {
+            "route": f"{trip.get('origin') or '?'} -> {trip.get('destination') or '?'}",
+            "trip_type": trip.get("trip_type") or "unknown",
+            "depart_date": trip.get("depart_date") or "",
+            "return_date": trip.get("return_date") or "",
+            "duration_days": trip.get("trip_duration_days")
+        },
+        "known_constraints": missing_chat_fields(trip),
+        "retrieved_context": {
+            "event": event_context_summary(trip),
+            "history_items": len(history) if isinstance(history, list) else 0
+        },
+        "perception_confidence": perception["confidence"]
+    }
+
+def safe_ai_trip_merge(message, current_trip, local_updates, ai_trip):
+    local_trip = apply_duration_to_trip(merge_trip_updates(current_trip, local_updates))
+    if not isinstance(ai_trip, dict):
+        return local_trip
+
+    ai_clean = coerce_chat_trip(ai_trip)
+    safe_updates = {}
+    lower = (message or "").lower()
+    destination_intent = any(term in lower for term in (" to ", "visit", "go", "fly", "travel", "destination"))
+    origin_intent = bool(re.search(r"\b(?:from|depart|departure|leaving|leave|start)\b", lower))
+
+    if not local_trip.get("origin") and is_airport_code(ai_clean.get("origin")) and origin_intent:
+        safe_updates["origin"] = ai_clean["origin"]
+    if not local_trip.get("destination") and is_airport_code(ai_clean.get("destination")) and destination_intent:
+        safe_updates["destination"] = ai_clean["destination"]
+
+    if not local_trip.get("trip_type") and ai_clean.get("trip_type"):
+        safe_updates["trip_type"] = ai_clean["trip_type"]
+
+    if has_date_evidence(message) or current_trip.get("depart_date"):
+        if ai_clean.get("depart_date") and not local_updates.get("depart_date"):
+            safe_updates["depart_date"] = ai_clean["depart_date"]
+        if ai_clean.get("date_window") and not local_updates.get("date_window"):
+            safe_updates["date_window"] = ai_clean["date_window"]
+
+    if current_trip.get("return_date") or local_updates.get("return_date"):
+        if ai_clean.get("return_date") and not local_updates.get("return_date"):
+            safe_updates["return_date"] = ai_clean["return_date"]
+
+    if has_passenger_evidence(message) and not local_updates.get("adults") and ai_clean.get("adults"):
+        safe_updates["adults"] = ai_clean["adults"]
+
+    for key in ("children", "infants", "priority", "cabin", "seat", "preference", "event_context", "trip_duration_days"):
+        if key not in local_updates and ai_clean.get(key) not in ("", None, {}, []):
+            safe_updates[key] = ai_clean[key]
+
+    return apply_duration_to_trip(merge_trip_updates(local_trip, safe_updates))
+
+def evaluate_brain_state(message, trip, perception):
     missing = missing_chat_fields(trip)
+    warnings = []
+
+    if not has_date_evidence(message) and not trip.get("depart_date"):
+        warnings.append("No departure date evidence; do not search yet.")
+    if "friend" in message.lower() and not has_passenger_evidence(message):
+        warnings.append("Passenger count is ambiguous.")
+
+    action = "search_live_fares" if not missing and not warnings else "ask_clarification"
+    confidence = "high" if action == "search_live_fares" and perception["confidence"] == "high" else "medium" if trip.get("destination") else "low"
+    return {
+        "action": action,
+        "missing_fields": missing,
+        "warnings": warnings,
+        "confidence": confidence,
+        "ready_to_search": action == "search_live_fares"
+    }
+
+def build_brain_loop(message, trip, perception, world_model, evaluation):
+    return {
+        "perceive": {
+            "status": "done",
+            "confidence": perception["confidence"],
+            "fields_seen": perception["fields_seen"],
+            "validation": perception["validation"]
+        },
+        "understand": {
+            "status": "done",
+            "summary": summarize_chat_trip(trip)
+        },
+        "build_context": {
+            "status": "done",
+            "world_model": world_model
+        },
+        "think": {
+            "status": "done",
+            "goal": "Decide whether AIFlight has enough verified facts to search live fares."
+        },
+        "decide": {
+            "status": evaluation["action"],
+            "missing_fields": evaluation["missing_fields"]
+        },
+        "act": {
+            "status": "call_flight_search" if evaluation["ready_to_search"] else "ask_user"
+        },
+        "evaluate": {
+            "status": "done",
+            "confidence": evaluation["confidence"],
+            "warnings": evaluation["warnings"]
+        },
+        "refine": {
+            "status": "done",
+            "rule": "Unsupported assumptions are removed before responding."
+        },
+        "respond": {
+            "status": "ready"
+        }
+    }
+
+def run_brain_loop(message, current_trip, history, ai_trip=None, ai_reply=""):
+    local_updates = rule_extract_trip_details(message)
+    perception = build_perception(message, local_updates)
+    trip = safe_ai_trip_merge(message, current_trip, local_updates, ai_trip)
+    world_model = build_world_model(trip, perception, history)
+    evaluation = evaluate_brain_state(message, trip, perception)
+    reply = "" if evaluation["ready_to_search"] else followup_reply(trip, evaluation["missing_fields"])
 
     return {
-        "reply": "" if not missing else followup_reply(trip, missing),
+        "reply": reply or ai_reply,
         "trip": trip,
-        "ready_to_search": not missing,
-        "missing_fields": missing
+        "ready_to_search": evaluation["ready_to_search"],
+        "missing_fields": evaluation["missing_fields"],
+        "brain_loop": build_brain_loop(message, trip, perception, world_model, evaluation),
+        "world_model": world_model,
+        "self_evaluation": evaluation
     }
+
+def local_agent_brain(message, current_trip):
+    return run_brain_loop(message, current_trip, [])
 
 def ai_agent_brain(message, current_trip, history):
     if not client:
@@ -962,19 +1203,23 @@ def ai_agent_brain(message, current_trip, history):
         "Your job is limited to flight deals, flight planning, and price strategy. "
         "You are not a form. Do not use fixed template language like 'I noted...' or 'Send that and I will pull live prices.' "
         "Talk naturally like a smart travel agent. "
+        "Run this loop before answering: perceive the raw message, understand structured trip facts, build context, decide whether to ask/search, self-check assumptions, then respond. "
         "Maintain the structured trip state from the conversation and the current_trip object. "
         "Convert cities, countries, misspellings, and phrases into IATA airport codes when the intent is clear "
         "(NYC/New York -> JFK unless user chooses LGA/EWR, Egypt/Eygpt/Cairo -> CAI, Paris -> CDG, London/Londen -> LHR). "
+        "Los Angeles, LA, or L.A. should be LAX unless the user chooses another airport. "
+        "If the user says 'with two friends', adults must be 3 total. "
         "If the user asks what information is missing, answer from current_trip. "
         "Required before live search: origin IATA, destination IATA, departure date YYYY-MM-DD, trip_type oneway or roundtrip, "
         "return date if roundtrip, and adults. Cabin defaults to economy. Priority defaults to balanced. "
+        "Never invent or assume a departure date. If the user says 'one week' without a departure date, store trip_duration_days=7 and ask for the departure date. "
         "If a user gives a date range and trip length, choose a sensible departure/return within the range and state the assumption. "
         "Outsmart airline pricing AI legally by asking for/using flexibility: nearby airports, date shifts, lower-stress routes, "
         "time-versus-money tradeoffs, and avoiding unnecessary paid bundles. "
         "If ready_to_search is false, ask only for the important missing details. "
         "If ready_to_search is true, do not invent prices; the backend will search live offers. "
         "Return JSON only with keys: reply, trip, ready_to_search, missing_fields. "
-        "trip keys: origin, destination, trip_type, depart_date, return_date, date_window, adults, children, infants, priority, cabin, seat, preference, event_context."
+        "trip keys: origin, destination, trip_type, depart_date, return_date, date_window, trip_duration_days, adults, children, infants, priority, cabin, seat, preference, event_context."
     )
 
     try:
@@ -1001,12 +1246,13 @@ def ai_agent_brain(message, current_trip, history):
         print("AI agent brain fallback:", str(exc), flush=True)
         return local_agent_brain(message, current_trip)
 
-    return {
-        "reply": str(brain.get("reply") or "").strip(),
-        "trip": coerce_chat_trip(brain.get("trip") or current_trip),
-        "ready_to_search": bool(brain.get("ready_to_search")),
-        "missing_fields": brain.get("missing_fields") if isinstance(brain.get("missing_fields"), list) else []
-    }
+    return run_brain_loop(
+        message,
+        current_trip,
+        history,
+        ai_trip=brain.get("trip") if isinstance(brain, dict) else None,
+        ai_reply=str(brain.get("reply") or "").strip() if isinstance(brain, dict) else ""
+    )
 
 
 @app.route("/")
@@ -1756,6 +2002,7 @@ def orchestrate_chat_trip(message, current_trip, history):
     brain = ai_agent_brain(message, current_trip, history)
     trip = brain["trip"]
     trace.append(trace_step("trip_orchestrator", "done", "Trip intent converted into structured trip state."))
+    trace.append(trace_step("ai_brain_loop", brain.get("self_evaluation", {}).get("action", "done"), "Perceive, understand, context, decision, and self-check completed."))
 
     missing = missing_chat_fields(trip)
     if missing or not brain["ready_to_search"]:
@@ -1770,6 +2017,9 @@ def orchestrate_chat_trip(message, current_trip, history):
             "ai_enabled": bool(client),
             "duffel_enabled": bool(DUFFEL_ACCESS_TOKEN),
             "providers": provider_status_snapshot(),
+            "brain_loop": brain.get("brain_loop", {}),
+            "world_model": brain.get("world_model", {}),
+            "self_evaluation": brain.get("self_evaluation", {}),
             "platform_trace": trace
         }
 
@@ -1820,6 +2070,9 @@ def orchestrate_chat_trip(message, current_trip, history):
         "offers": offers,
         "deal_space": deal_space,
         "providers": provider_status_snapshot(),
+        "brain_loop": brain.get("brain_loop", {}),
+        "world_model": brain.get("world_model", {}),
+        "self_evaluation": brain.get("self_evaluation", {}),
         "platform_trace": trace,
         "links": links,
         "reason": reason

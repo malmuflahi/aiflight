@@ -70,6 +70,7 @@ function renderNotes(trip = {}) {
     const date = trip.depart_date || (trip.date_window ? `${trip.date_window}, exact date needed` : "");
     const tripType = trip.trip_type === "roundtrip" ? "Round trip" : trip.trip_type === "oneway" ? "One way" : "";
     const returnDate = trip.trip_type === "roundtrip" ? trip.return_date : "Not needed";
+    const duration = trip.trip_duration_days ? `${trip.trip_duration_days} days` : "";
     const priority = trip.priority ? trip.priority.replace("_", " ") : "";
     const cabin = trip.cabin ? trip.cabin.replace("_", " ") : "Economy default";
 
@@ -78,6 +79,7 @@ function renderNotes(trip = {}) {
         labelValue("Route", route),
         labelValue("Departure", date),
         labelValue("Trip type", tripType),
+        labelValue("Duration", duration),
         labelValue("Return", returnDate),
         labelValue("Passengers", passengerSummary(trip)),
         labelValue("Cabin", cabin),
