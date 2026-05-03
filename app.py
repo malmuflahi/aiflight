@@ -130,6 +130,34 @@ FLIGHT_PROVIDERS = [
     {"id": "fallback_links", "name": "Google/Kayak/Skyscanner fallback links", "status": "available"}
 ]
 
+AIRLINE_PRICING_MODEL = {
+    "airline_goal": "Maximize airline revenue per seat and per customer shopping context.",
+    "pricing_inputs": [
+        "time before departure",
+        "remaining capacity and booking pace",
+        "route demand and seasonality",
+        "day/time of travel",
+        "length of stay",
+        "competitor prices",
+        "customer shopping context",
+        "fare bundles, bags, seats, refunds, and flexibility"
+    ],
+    "weak_points": [
+        "one airline cannot recommend a competitor",
+        "one airline cannot optimize nearby airports across competitors",
+        "one airline is focused on revenue, not traveler value",
+        "dynamic bundles can make the lowest fare a worse total deal",
+        "forecast errors and low inventory can create unstable prices"
+    ],
+    "buyer_counter_moves": [
+        "compare nearby airports",
+        "shift departure and return dates",
+        "compare total trip cost, not ticket price only",
+        "rank comfort, stops, and timing against savings",
+        "watch unstable fares when there is enough time"
+    ]
+}
+
 EVAL_CASES = [
     {
         "name": "paris_roundtrip",
@@ -1053,6 +1081,18 @@ def build_perception(message, local_updates):
     }
 
 def build_world_model(trip, perception, history):
+    buyer_advantage = []
+    if trip.get("origin") in NEARBY_AIRPORTS or trip.get("destination") in NEARBY_AIRPORTS:
+        buyer_advantage.append("nearby airport comparison")
+    if trip.get("trip_duration_days") or trip.get("date_window"):
+        buyer_advantage.append("date or trip-length flexibility")
+    if trip.get("priority") == "comfort":
+        buyer_advantage.append("comfort-weighted scoring instead of lowest fare only")
+    elif trip.get("priority") == "cheapest":
+        buyer_advantage.append("price-weighted scoring with backup tradeoffs")
+    else:
+        buyer_advantage.append("balanced price/time/stops scoring")
+
     return {
         "user_preferences": {
             "priority": trip.get("priority") or "balanced",
@@ -1072,6 +1112,8 @@ def build_world_model(trip, perception, history):
             "event": event_context_summary(trip),
             "history_items": len(history) if isinstance(history, list) else 0
         },
+        "airline_pricing_model": AIRLINE_PRICING_MODEL,
+        "buyer_advantage": buyer_advantage,
         "perception_confidence": perception["confidence"]
     }
 
@@ -1116,11 +1158,19 @@ def safe_ai_trip_merge(message, current_trip, local_updates, ai_trip):
 def evaluate_brain_state(message, trip, perception):
     missing = missing_chat_fields(trip)
     warnings = []
+    strategy_tests = []
 
     if not has_date_evidence(message) and not trip.get("depart_date"):
         warnings.append("No departure date evidence; do not search yet.")
     if "friend" in message.lower() and not has_passenger_evidence(message):
         warnings.append("Passenger count is ambiguous.")
+    if trip.get("origin") in NEARBY_AIRPORTS:
+        strategy_tests.append("test nearby origin airports")
+    if trip.get("destination") in NEARBY_AIRPORTS:
+        strategy_tests.append("test nearby destination airports")
+    if trip.get("priority") != "fastest":
+        strategy_tests.append("test one-day date shifts")
+    strategy_tests.append("rank total traveler value, not airline revenue")
 
     action = "search_live_fares" if not missing and not warnings else "ask_clarification"
     confidence = "high" if action == "search_live_fares" and perception["confidence"] == "high" else "medium" if trip.get("destination") else "low"
@@ -1128,6 +1178,7 @@ def evaluate_brain_state(message, trip, perception):
         "action": action,
         "missing_fields": missing,
         "warnings": warnings,
+        "strategy_tests": strategy_tests,
         "confidence": confidence,
         "ready_to_search": action == "search_live_fares"
     }
@@ -1150,7 +1201,9 @@ def build_brain_loop(message, trip, perception, world_model, evaluation):
         },
         "think": {
             "status": "done",
-            "goal": "Decide whether AIFlight has enough verified facts to search live fares."
+            "goal": "Decide whether AIFlight has enough verified facts to search live fares.",
+            "airline_model": AIRLINE_PRICING_MODEL["airline_goal"],
+            "buyer_tests": evaluation["strategy_tests"]
         },
         "decide": {
             "status": evaluation["action"],
@@ -1162,7 +1215,8 @@ def build_brain_loop(message, trip, perception, world_model, evaluation):
         "evaluate": {
             "status": "done",
             "confidence": evaluation["confidence"],
-            "warnings": evaluation["warnings"]
+            "warnings": evaluation["warnings"],
+            "best_guess_basis": evaluation["strategy_tests"]
         },
         "refine": {
             "status": "done",
@@ -1201,6 +1255,8 @@ def ai_agent_brain(message, current_trip, history):
     system_prompt = (
         "You are AIFlight, an AI travel agent built to beat airline pricing AI for clients. "
         "Your job is limited to flight deals, flight planning, and price strategy. "
+        "Understand airline AI first: airline pricing systems optimize revenue using time before departure, remaining capacity, booking pace, route demand, length of stay, competitor prices, shopping context, and bundles. "
+        "AIFlight is buyer-side AI: it beats airline AI by testing nearby airports, date shifts, total trip value, comfort/time tradeoffs, and when to buy or wait. "
         "You are not a form. Do not use fixed template language like 'I noted...' or 'Send that and I will pull live prices.' "
         "Talk naturally like a smart travel agent. "
         "Run this loop before answering: perceive the raw message, understand structured trip facts, build context, decide whether to ask/search, self-check assumptions, then respond. "
@@ -1761,10 +1817,55 @@ def median_price(prices):
         return ordered[midpoint]
     return (ordered[midpoint - 1] + ordered[midpoint]) / 2
 
+def airline_ai_context(trip, offers, deal_space):
+    days_out = days_until_departure(trip)
+    offer_count = len(offers or [])
+    searches_checked = len(deal_space or [])
+    factors = []
+
+    if days_out is not None:
+        if days_out <= 21:
+            factors.append("close-in departure window usually increases urgency pressure")
+        elif days_out >= 90:
+            factors.append("far-out departure window may still have monitoring room")
+        else:
+            factors.append("mid-range booking window; price can still move with demand")
+
+    if trip.get("trip_duration_days"):
+        factors.append(f"{trip['trip_duration_days']}-day stay affects airline demand segmentation")
+
+    if offer_count <= 2:
+        factors.append("low offer count can indicate limited inventory or weak provider coverage")
+    elif offer_count >= 5:
+        factors.append("multiple offers create a stronger comparison surface")
+
+    if searches_checked > 1:
+        factors.append("AIFlight tested variations airlines do not optimize for the traveler")
+
+    if trip.get("priority") == "comfort":
+        factors.append("comfort priority reduces exposure to cheap-but-painful fare traps")
+
+    return {
+        "airline_goal": AIRLINE_PRICING_MODEL["airline_goal"],
+        "likely_pricing_factors": factors,
+        "buyer_counter_moves": AIRLINE_PRICING_MODEL["buyer_counter_moves"],
+        "weak_points_tested": [
+            move for move in AIRLINE_PRICING_MODEL["buyer_counter_moves"]
+            if (
+                ("nearby" in move and searches_checked > 1)
+                or ("shift" in move and searches_checked > 1)
+                or ("total" in move)
+                or ("comfort" in move and trip.get("priority") == "comfort")
+                or ("watch" in move and days_out is not None and days_out > 45)
+            )
+        ]
+    }
+
 def build_price_intelligence(trip, offers, deal_space, reason):
     searches = deal_space or []
     history = route_observations(trip)
     days_out = days_until_departure(trip)
+    pricing_context = airline_ai_context(trip, offers, searches)
     source_status = "ok" if offers else reason
     sources = [
         {
@@ -1794,12 +1895,15 @@ def build_price_intelligence(trip, offers, deal_space, reason):
         return {
             "decision": "Verify setup" if reason in ("missing_token", "missing_httpx") else "Check alternate sources",
             "confidence": "low",
+            "best_guess": "Weak best guess",
             "summary": details["explanation"],
             "prediction": "No price forecast yet because live fares were not returned.",
             "personalization": f"Priority is {trip.get('priority') or 'balanced'} and cabin is {trip.get('cabin') or 'economy'}.",
+            "pricing_context": pricing_context,
             "sources": sources,
             "signals": [
                 details["status"],
+                f"Airline-side model: {pricing_context['airline_goal']}",
                 "AIFlight did not invent a price because the live fare dataset was empty.",
                 "Fallback search links are available while live pricing is verified."
             ],
@@ -1835,9 +1939,13 @@ def build_price_intelligence(trip, offers, deal_space, reason):
     previous_low = min((item["best_price"] for item in history), default=None)
 
     signals = [
+        f"Airline-side model: {pricing_context['airline_goal']}",
         f"Checked {len(searches)} route/date variation(s), not just the exact request.",
         f"Best candidate came from: {best.get('search_note', 'Exact trip')}."
     ]
+
+    for factor in pricing_context["likely_pricing_factors"]:
+        signals.append(f"Pricing factor watched: {factor}.")
 
     if savings_vs_exact > 0:
         signals.append(f"Counter-pricing found {format_money(currency, savings_vs_exact)} below the best exact-trip fare.")
@@ -1866,6 +1974,9 @@ def build_price_intelligence(trip, offers, deal_space, reason):
     anti_moves.append("Avoid paid bundles until baggage, seat, and refund rules are confirmed.")
     anti_moves.append("Do not refresh the same checkout endlessly; re-run a clean comparison if the price moves.")
 
+    for move in pricing_context["weak_points_tested"]:
+        anti_moves.append(f"Buyer-side counter move: {move}.")
+
     if days_out is not None and days_out <= 21:
         decision = "Buy now if baggage and rules fit"
         prediction = "Close departure window: price risk is tilted upward."
@@ -1892,12 +2003,19 @@ def build_price_intelligence(trip, offers, deal_space, reason):
         f"{format_money(currency, best['price_value'])}. Median checked fare was "
         f"{format_money(currency, median)}."
     )
+    best_guess = (
+        "Strong best guess" if confidence == "high"
+        else "Reasonable best guess" if confidence == "medium"
+        else "Weak best guess"
+    )
 
     return {
         "decision": decision,
         "confidence": confidence,
+        "best_guess": best_guess,
         "summary": summary,
         "prediction": prediction,
+        "pricing_context": pricing_context,
         "personalization": (
             f"Scoring is weighted for {trip.get('priority') or 'balanced'} priority, "
             f"{trip.get('cabin') or 'economy'} cabin, and {trip.get('adults') or 1} adult traveler(s)."

@@ -201,7 +201,7 @@ function renderStrategy(data) {
                     <span>Decision engine</span>
                     <h2>${escapeHTML(intelligence.decision || "Best flight strategy")}</h2>
                 </div>
-                <strong>${escapeHTML(intelligence.confidence || "checking")} confidence</strong>
+                <strong>${escapeHTML(intelligence.best_guess || intelligence.confidence || "checking")}</strong>
             </div>
 
             <p>${escapeHTML(intelligence.summary || data.strategy || data.reply)}</p>
@@ -216,6 +216,10 @@ function renderStrategy(data) {
                 <section class="intel-panel">
                     <h3>Anti-pricing moves</h3>
                     ${renderList(intelligence.anti_pricing_moves || [])}
+                </section>
+                <section class="intel-panel">
+                    <h3>Airline AI read</h3>
+                    ${renderList(intelligence.pricing_context?.likely_pricing_factors || [])}
                 </section>
                 <section class="intel-panel">
                     <h3>Sources checked</h3>

@@ -25,6 +25,7 @@ AIFlight is moving from a simple flight search tool into a personal travel decis
 - AI brain loop: perceive, understand, build context, decide, act, self-evaluate, refine, then respond.
 - World model: stores current task, user preferences, known constraints, retrieved context, and confidence before search.
 - Assumption guard: unsupported model guesses, especially invented dates and passenger counts, are removed before action.
+- Buyer-side airline model: the brain understands airline AI as revenue optimization using time, capacity, demand, shopping context, competitors, and bundles, then counters it with nearby-airport, date-shift, total-value, comfort, and buy/wait tests.
 - Trip orchestrator: one backend path coordinates intent, provider search, scoring, explanation, and UI response.
 - Flight data platform: Duffel live fares plus fallback links; provider registry is ready for Travelpayouts and future GDS/direct airline APIs.
 - Provider execution: deal-space searches run with retries and parallel workers.
