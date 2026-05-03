@@ -1,6 +1,9 @@
 import json
 import os
 import re
+import time
+from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from urllib.parse import quote_plus
 from flask import Flask, render_template, request, jsonify
@@ -22,6 +25,20 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 DUFFEL_ACCESS_TOKEN = os.getenv("DUFFEL_ACCESS_TOKEN", "")
 
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY and OpenAI else None
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; connect-src 'self'; img-src 'self' data:; "
+        "style-src 'self'; script-src 'self'; form-action 'self'; "
+        "base-uri 'self'; frame-ancestors 'none'"
+    )
+    return response
 
 AIRPORT_MAP = {
     "egypt": "CAI", "eygpt": "CAI", "egpyt": "CAI", "egyptt": "CAI", "cairo": "CAI",
@@ -76,6 +93,175 @@ DAY_WORDS = {
     "six": 6,
     "seven": 7
 }
+
+PRICE_OBSERVATIONS = []
+MAX_PRICE_OBSERVATIONS = 250
+FEEDBACK_EVENTS = []
+MAX_FEEDBACK_EVENTS = 250
+API_EVENTS = deque(maxlen=500)
+RATE_LIMIT_BUCKETS = defaultdict(deque)
+
+PLATFORM_LAYERS = [
+    "api_gateway",
+    "trip_orchestrator",
+    "flight_data_platform",
+    "data_quality_normalization",
+    "feature_engine",
+    "ai_ml_intelligence",
+    "decision_engine",
+    "llm_explanation",
+    "results_experience",
+    "feedback_learning_loop",
+    "monitoring_evals_safety"
+]
+
+FLIGHT_PROVIDERS = [
+    {"id": "duffel", "name": "Duffel API", "status": "live"},
+    {"id": "travelpayouts", "name": "Travelpayouts", "status": "planned"},
+    {"id": "future_gds", "name": "Future GDS / direct airline APIs", "status": "planned"},
+    {"id": "fallback_links", "name": "Google/Kayak/Skyscanner fallback links", "status": "available"}
+]
+
+EVAL_CASES = [
+    {
+        "name": "paris_roundtrip",
+        "message": "I want to visit Paris from NYC June 10 2026 return June 17 2026 1 adult economy",
+        "expected": {"origin": "JFK", "destination": "CDG", "trip_type": "roundtrip"}
+    },
+    {
+        "name": "egypt_typo",
+        "message": "go to eygpt from JFK 6/27/2026 one way 1 adult economy",
+        "expected": {"origin": "JFK", "destination": "CAI", "trip_type": "oneway"}
+    },
+    {
+        "name": "world_cup_texas",
+        "message": "I want to watch the first World Cup match in Texas. Book me a round trip flight from NYC, arrive one day before the match, come back two days after, 1 adult, economy, best value.",
+        "expected": {"origin": "JFK", "destination": "IAH", "trip_type": "roundtrip", "depart_date": "2026-06-13", "return_date": "2026-06-16"}
+    },
+    {
+        "name": "london_from_boston",
+        "message": "I want to visit London from Boston July 5 2026 return July 12 2026, 2 adults, cheapest economy.",
+        "expected": {"origin": "BOS", "destination": "LHR", "trip_type": "roundtrip"}
+    }
+]
+
+def utc_now():
+    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+def client_fingerprint():
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+def trace_step(layer, status, detail, **extra):
+    step = {
+        "layer": layer,
+        "status": status,
+        "detail": detail,
+        "at": utc_now()
+    }
+    step.update(extra)
+    return step
+
+def record_api_event(endpoint, status, detail="", **extra):
+    event = {
+        "endpoint": endpoint,
+        "status": status,
+        "detail": detail,
+        "at": utc_now()
+    }
+    event.update(extra)
+    API_EVENTS.append(event)
+
+def json_error(message, status_code=400, code="bad_request"):
+    record_api_event(request.path, "blocked", code)
+    return jsonify({"error": message, "code": code}), status_code
+
+def rate_limit_key(endpoint):
+    return f"{client_fingerprint()}:{endpoint}"
+
+def is_rate_limited(endpoint, limit=30, window_seconds=60):
+    now = time.time()
+    bucket = RATE_LIMIT_BUCKETS[rate_limit_key(endpoint)]
+
+    while bucket and now - bucket[0] > window_seconds:
+        bucket.popleft()
+
+    if len(bucket) >= limit:
+        return True
+
+    bucket.append(now)
+    return False
+
+def detect_abuse_text(text):
+    text = str(text or "")
+    lower = text.lower()
+    blocked_terms = (
+        "ignore previous instructions",
+        "system prompt",
+        "api key",
+        "duffel token",
+        "openai key"
+    )
+    if len(text) > 1800:
+        return "Message is too long for one trip request."
+    if any(term in lower for term in blocked_terms):
+        return "I can help with flight planning, but I cannot expose or manipulate system credentials."
+    if len(set(text.split())) < 4 and len(text.split()) > 60:
+        return "Message looks repetitive. Send one clear trip request."
+    return ""
+
+def validate_chat_payload(data):
+    if not isinstance(data, dict):
+        return None, "Request body must be JSON."
+
+    message = str(data.get("message") or "").strip()
+    if not message:
+        return None, "Message is required."
+
+    abuse_reason = detect_abuse_text(message)
+    if abuse_reason:
+        return None, abuse_reason
+
+    history = data.get("history") if isinstance(data.get("history"), list) else []
+    trip = coerce_chat_trip(data.get("trip") or {})
+    return {
+        "message": message,
+        "history": history[-12:],
+        "trip": trip
+    }, ""
+
+def validate_search_trip(data):
+    if not isinstance(data, dict):
+        return None, "Request body must be JSON."
+
+    trip = {
+        "origin": normalize_airport(data.get("origin", "LGA")),
+        "destination": normalize_airport(data.get("destination", "BOS")),
+        "trip_type": normalize_trip_type(data.get("tripType", data.get("trip_type", "oneway"))) or "oneway",
+        "depart_date": data.get("departDate", data.get("depart_date", "")),
+        "return_date": data.get("returnDate", data.get("return_date", "")),
+        "adults": parse_passenger_count(data.get("adults", 1), default=1, minimum=1),
+        "children": parse_passenger_count(data.get("children", 0)),
+        "infants": parse_passenger_count(data.get("infants", 0)),
+        "priority": normalize_priority(data.get("priority", "balanced")) or "balanced",
+        "cabin": normalize_cabin(data.get("cabin", "economy")) or "economy",
+        "seat": normalize_seat(data.get("seat", "none")) or "none",
+        "preference": str(data.get("preference", "")).strip(),
+        "event_context": data.get("event_context", {}) if isinstance(data.get("event_context"), dict) else {}
+    }
+
+    if not is_airport_code(trip["origin"]):
+        return None, "Origin must be a valid airport or known city."
+    if not is_airport_code(trip["destination"]):
+        return None, "Destination must be a valid airport or known city."
+    if not is_valid_date(trip["depart_date"]):
+        return None, "A valid departure date is required."
+    if trip["trip_type"] == "roundtrip" and not is_valid_date(trip["return_date"]):
+        return None, "A valid return date is required for round trips."
+
+    return trip, ""
 
 def normalize_airport(value):
     value = (value or "").strip()
@@ -702,7 +888,7 @@ def trip_plan_line(trip):
 def trip_ready_line(trip):
     return f"You are not missing any trip details. I have {summarize_chat_trip(trip)}."
 
-def ai_chat_reply(message, trip, offers, cards, links, reason, plan, strategy, history):
+def ai_chat_reply(message, trip, offers, cards, links, reason, plan, strategy, history, intelligence=None):
     if offers:
         fallback = f"{plan} I found live prices and picked the strongest option: {cards[0]['signal']}. {strategy}".strip()
     else:
@@ -721,6 +907,7 @@ def ai_chat_reply(message, trip, offers, cards, links, reason, plan, strategy, h
                         "You are AIFlight, a ChatGPT-style travel assistant. "
                         "Write a warm, direct travel-agent answer in natural language. "
                         "Use only the provided trip, event, offers, cards, and strategy. "
+                        "Use the price intelligence object to explain buy/wait logic, confidence, and counter-pricing signals. "
                         "If offers exist, clearly show the best price and why it won. "
                         "If no offers exist, explain the search result without pretending prices exist. "
                         "Do not invent match details, prices, airlines, ticket availability, hotels, or booking confirmations. "
@@ -738,6 +925,7 @@ def ai_chat_reply(message, trip, offers, cards, links, reason, plan, strategy, h
                         "plan": plan,
                         "offers": offers,
                         "deal_space": trip.get("deal_space", []),
+                        "price_intelligence": intelligence or {},
                         "result_cards": cards,
                         "search_links_available": bool(links),
                         "reason_if_no_offers": reason,
@@ -1012,6 +1200,21 @@ def build_counter_pricing_candidates(trip):
 
     return candidates[:5]
 
+def is_retryable_provider_reason(reason):
+    return reason == "exception" or reason in ("duffel_error_408", "duffel_error_425", "duffel_error_429") or reason.startswith("duffel_error_5")
+
+def fetch_candidate_with_retry(candidate, attempts=2):
+    last_offers, last_reason = [], "not_run"
+
+    for attempt in range(1, attempts + 1):
+        offers, reason = fetch_duffel_offers(candidate)
+        last_offers, last_reason = offers, reason
+        if offers or not is_retryable_provider_reason(reason):
+            return offers, reason, attempt
+        time.sleep(0.25 * attempt)
+
+    return last_offers, last_reason, attempts
+
 def fetch_deal_space_offers(trip):
     if not httpx or not DUFFEL_ACCESS_TOKEN:
         offers, reason = fetch_duffel_offers(dict(trip, search_note="Exact trip"))
@@ -1027,21 +1230,40 @@ def fetch_deal_space_offers(trip):
 
     all_offers = []
     reasons = []
+    candidates = build_counter_pricing_candidates(trip)
+    candidate_results = []
 
-    for candidate in build_counter_pricing_candidates(trip):
-        offers, reason = fetch_duffel_offers(candidate)
+    with ThreadPoolExecutor(max_workers=min(5, len(candidates))) as executor:
+        futures = {
+            executor.submit(fetch_candidate_with_retry, candidate): (index, candidate)
+            for index, candidate in enumerate(candidates)
+        }
+
+        for future in as_completed(futures):
+            index, candidate = futures[future]
+            try:
+                offers, reason, attempts = future.result()
+            except Exception as exc:
+                print("Provider worker exception:", str(exc), flush=True)
+                offers, reason, attempts = [], "exception", 1
+            candidate_results.append((index, candidate, offers, reason, attempts))
+
+    for _, candidate, offers, reason, attempts in sorted(candidate_results, key=lambda item: item[0]):
         reasons.append({
+            "provider": "duffel",
             "search_note": candidate.get("search_note"),
             "origin": candidate.get("origin"),
             "destination": candidate.get("destination"),
             "depart_date": candidate.get("depart_date"),
             "return_date": candidate.get("return_date"),
             "reason": reason,
-            "offers": len(offers)
+            "offers": len(offers),
+            "attempts": attempts
         })
 
         for offer in offers:
             copy = dict(offer)
+            copy["provider"] = "duffel"
             copy["search_note"] = candidate.get("search_note", "Exact trip")
             copy["origin"] = candidate.get("origin")
             copy["destination"] = candidate.get("destination")
@@ -1243,6 +1465,212 @@ def route_line(offer):
         route = f"{route}, return {offer['return_date']}".strip()
     return route or "selected route"
 
+def days_until_departure(trip):
+    if not is_valid_date(trip.get("depart_date")):
+        return None
+
+    depart_date = datetime.strptime(trip["depart_date"], "%Y-%m-%d").date()
+    return (depart_date - datetime.now().date()).days
+
+def route_signature(trip):
+    return (
+        trip.get("origin"),
+        trip.get("destination"),
+        trip.get("trip_type"),
+        trip.get("cabin") or "economy"
+    )
+
+def route_observations(trip):
+    signature = route_signature(trip)
+    return [item for item in PRICE_OBSERVATIONS if item.get("signature") == signature]
+
+def record_price_observation(trip, offers, intelligence):
+    if not offers:
+        return
+
+    prices = [parse_price(offer.get("price")) for offer in offers]
+    prices = [price for price in prices if price < 999999]
+    if not prices:
+        return
+
+    PRICE_OBSERVATIONS.append({
+        "signature": route_signature(trip),
+        "observed_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "depart_date": trip.get("depart_date"),
+        "return_date": trip.get("return_date"),
+        "best_price": min(prices),
+        "currency": offers[0].get("currency", "USD"),
+        "decision": intelligence.get("decision", "")
+    })
+
+    del PRICE_OBSERVATIONS[:-MAX_PRICE_OBSERVATIONS]
+
+def median_price(prices):
+    if not prices:
+        return 999999
+
+    ordered = sorted(prices)
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[midpoint]
+    return (ordered[midpoint - 1] + ordered[midpoint]) / 2
+
+def build_price_intelligence(trip, offers, deal_space, reason):
+    searches = deal_space or []
+    history = route_observations(trip)
+    days_out = days_until_departure(trip)
+    source_status = "ok" if offers else reason
+    sources = [
+        {
+            "name": "Duffel live fares",
+            "status": source_status,
+            "detail": f"{len(offers)} live offer(s) returned"
+        },
+        {
+            "name": "Counter-pricing deal space",
+            "status": "active" if searches else "not run",
+            "detail": f"{len(searches)} route/date variation(s) checked"
+        },
+        {
+            "name": "Trusted fallback links",
+            "status": "ready",
+            "detail": "Google Flights, Kayak, and Skyscanner links generated"
+        },
+        {
+            "name": "Session learning memory",
+            "status": "active",
+            "detail": f"{len(history)} prior observation(s) for this route in this server session"
+        }
+    ]
+
+    if not offers:
+        details = fallback_details(trip, reason)
+        return {
+            "decision": "Verify setup" if reason in ("missing_token", "missing_httpx") else "Check alternate sources",
+            "confidence": "low",
+            "summary": details["explanation"],
+            "prediction": "No price forecast yet because live fares were not returned.",
+            "personalization": f"Priority is {trip.get('priority') or 'balanced'} and cabin is {trip.get('cabin') or 'economy'}.",
+            "sources": sources,
+            "signals": [
+                details["status"],
+                "AIFlight did not invent a price because the live fare dataset was empty.",
+                "Fallback search links are available while live pricing is verified."
+            ],
+            "anti_pricing_moves": [
+                "Retry with nearby airports if the route is flexible.",
+                "Try a one-day date shift to test whether airline pricing changes.",
+                "Compare the fallback links before committing money."
+            ],
+            "metrics": {
+                "offers_found": 0,
+                "searches_checked": len(searches),
+                "days_until_departure": days_out,
+                "history_count": len(history)
+            }
+        }
+
+    ranked, best, cheapest, fastest = analyze_offers(offers, trip)
+    prices = [offer["price_value"] for offer in ranked if offer["price_value"] < 999999]
+    lowest = min(prices, default=best["price_value"])
+    highest = max(prices, default=best["price_value"])
+    median = median_price(prices)
+    currency = best.get("currency", "USD")
+    exact_prices = [
+        parse_price(offer.get("price"))
+        for offer in offers
+        if offer.get("search_note", "Exact trip") == "Exact trip"
+    ]
+    exact_prices = [price for price in exact_prices if price < 999999]
+    exact_low = min(exact_prices, default=None)
+    savings_vs_exact = max(0, exact_low - best["price_value"]) if exact_low is not None else 0
+    spread = max(0, highest - lowest)
+    spread_pct = 0 if lowest <= 0 else spread / lowest
+    previous_low = min((item["best_price"] for item in history), default=None)
+
+    signals = [
+        f"Checked {len(searches)} route/date variation(s), not just the exact request.",
+        f"Best candidate came from: {best.get('search_note', 'Exact trip')}."
+    ]
+
+    if savings_vs_exact > 0:
+        signals.append(f"Counter-pricing found {format_money(currency, savings_vs_exact)} below the best exact-trip fare.")
+    if spread_pct >= 0.25:
+        signals.append(f"Large fare spread detected: {format_money(currency, spread)} between low and high offers.")
+    elif spread > 0:
+        signals.append(f"Moderate fare spread detected: {format_money(currency, spread)} across live offers.")
+    if previous_low is not None:
+        delta = best["price_value"] - previous_low
+        if delta > 0:
+            signals.append(f"This search is {format_money(currency, delta)} above this session's previous low.")
+        elif delta < 0:
+            signals.append(f"This search beat this session's previous low by {format_money(currency, abs(delta))}.")
+        else:
+            signals.append("This search matches this session's previous low.")
+    if len(offers) <= 2:
+        signals.append("Low offer count: treat this as pricing pressure, not a full market view.")
+
+    anti_moves = []
+    if best.get("search_note", "Exact trip") != "Exact trip":
+        anti_moves.append(f"Use the winning variation: {best.get('search_note')} - {route_line(best)}.")
+    else:
+        anti_moves.append("Exact trip is currently competitive; still compare nearby airports before payment.")
+    if trip.get("priority") != "fastest":
+        anti_moves.append("Keep the one-day date shift open if the fare jumps before checkout.")
+    anti_moves.append("Avoid paid bundles until baggage, seat, and refund rules are confirmed.")
+    anti_moves.append("Do not refresh the same checkout endlessly; re-run a clean comparison if the price moves.")
+
+    if days_out is not None and days_out <= 21:
+        decision = "Buy now if baggage and rules fit"
+        prediction = "Close departure window: price risk is tilted upward."
+        confidence = "medium"
+    elif savings_vs_exact >= 25:
+        decision = "Buy the counter-priced option"
+        prediction = "The alternate airport/date is already beating the exact request."
+        confidence = "high" if len(searches) >= 3 else "medium"
+    elif spread_pct >= 0.25:
+        decision = "Hold only if flexible, otherwise buy the low fare"
+        prediction = "Wide spread means airline pricing is unstable across similar options."
+        confidence = "medium"
+    elif len(offers) >= 4 and days_out is not None and days_out > 60:
+        decision = "Watch 24-48 hours"
+        prediction = "There is enough time and offer depth to monitor one more pricing move."
+        confidence = "medium"
+    else:
+        decision = "Buy if this matches the trip goal"
+        prediction = "No strong wait signal; protect the current fare if it fits."
+        confidence = "medium"
+
+    summary = (
+        f"{decision}: AIFlight ranked {best.get('airline', 'the best offer')} at "
+        f"{format_money(currency, best['price_value'])}. Median checked fare was "
+        f"{format_money(currency, median)}."
+    )
+
+    return {
+        "decision": decision,
+        "confidence": confidence,
+        "summary": summary,
+        "prediction": prediction,
+        "personalization": (
+            f"Scoring is weighted for {trip.get('priority') or 'balanced'} priority, "
+            f"{trip.get('cabin') or 'economy'} cabin, and {trip.get('adults') or 1} adult traveler(s)."
+        ),
+        "sources": sources,
+        "signals": signals,
+        "anti_pricing_moves": anti_moves,
+        "metrics": {
+            "offers_found": len(offers),
+            "searches_checked": len(searches),
+            "days_until_departure": days_out,
+            "lowest_price": format_money(currency, lowest),
+            "median_price": format_money(currency, median),
+            "highest_price": format_money(currency, highest),
+            "savings_vs_exact": format_money(currency, savings_vs_exact),
+            "history_count": len(history)
+        }
+    }
+
 def cards_from_offers(offers, trip):
     ranked, best, cheapest, fastest = analyze_offers(offers, trip)
     tradeoff = tradeoff_line(best, cheapest, fastest)
@@ -1282,7 +1710,7 @@ def cards_from_offers(offers, trip):
 
     return cards
 
-def ai_strategy(trip, offers, reason):
+def ai_strategy(trip, offers, reason, intelligence=None):
     if offers:
         ranked, best, cheapest, fastest = analyze_offers(offers, trip)
         fallback = (
@@ -1301,7 +1729,7 @@ def ai_strategy(trip, offers, reason):
             model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": "You are AIFlight, a flight price-defense algorithm."},
-                {"role": "user", "content": f"Trip: {trip}\nDuffel offers: {offers}\nDeterministic recommendation: {fallback}\nReason if empty: {reason}\nWrite a short, direct recommendation for one best flight. Mention useful tradeoffs like saving money for a longer trip when supported by the data. Do not invent prices, airlines, or flight details."}
+                {"role": "user", "content": f"Trip: {trip}\nDuffel offers: {offers}\nPrice intelligence: {intelligence or {}}\nDeterministic recommendation: {fallback}\nReason if empty: {reason}\nWrite a short, direct recommendation for one best flight. Mention useful tradeoffs like saving money for a longer trip when supported by the data. Do not invent prices, airlines, or flight details."}
             ],
             max_tokens=150,
             temperature=0.45
@@ -1310,33 +1738,44 @@ def ai_strategy(trip, offers, reason):
     except Exception:
         return fallback
 
-@app.route("/api/chat", methods=["POST"])
-def chat():
-    data = request.get_json(silent=True) or {}
-    message = str(data.get("message") or "").strip()
-    history = data.get("history") if isinstance(data.get("history"), list) else []
+def provider_status_snapshot():
+    providers = []
+    for provider in FLIGHT_PROVIDERS:
+        item = dict(provider)
+        if item["id"] == "duffel":
+            item["configured"] = bool(DUFFEL_ACCESS_TOKEN and httpx)
+            item["status"] = "live" if item["configured"] else "needs_setup"
+        providers.append(item)
+    return providers
 
-    if not message:
-        return jsonify({"error": "Message is required."}), 400
+def orchestrate_chat_trip(message, current_trip, history):
+    trace = [
+        trace_step("api_gateway", "passed", "Payload accepted, rate limit checked, and input normalized.")
+    ]
 
-    current_trip = coerce_chat_trip(data.get("trip") or {})
     brain = ai_agent_brain(message, current_trip, history)
     trip = brain["trip"]
+    trace.append(trace_step("trip_orchestrator", "done", "Trip intent converted into structured trip state."))
 
     missing = missing_chat_fields(trip)
     if missing or not brain["ready_to_search"]:
         missing_fields = missing or brain["missing_fields"]
         reply = brain["reply"] or ai_followup_reply(message, trip, missing_fields, history)
-        return jsonify({
+        trace.append(trace_step("decision_engine", "waiting", "More trip details are required before live pricing.", missing=missing_fields))
+        return {
             "complete": False,
             "reply": reply,
             "trip": trip,
             "missing": missing_fields,
             "ai_enabled": bool(client),
-            "duffel_enabled": bool(DUFFEL_ACCESS_TOKEN)
-        })
+            "duffel_enabled": bool(DUFFEL_ACCESS_TOKEN),
+            "providers": provider_status_snapshot(),
+            "platform_trace": trace
+        }
 
     search_trip = prepare_chat_search_trip(trip)
+    trace.append(trace_step("data_quality_normalization", "done", "Trip state normalized for provider search."))
+
     links = build_search_links(
         search_trip["origin"],
         search_trip["destination"],
@@ -1346,60 +1785,51 @@ def chat():
     )
 
     offers, reason, deal_space = fetch_deal_space_offers(search_trip)
+    search_trip["deal_space"] = deal_space
+    provider_detail = f"{len(offers)} offer(s) from {len(deal_space)} deal-space search(es)."
+    trace.append(trace_step("flight_data_platform", reason, provider_detail, providers=provider_status_snapshot()))
+
     if offers:
         cards = cards_from_offers(offers, search_trip)
     else:
         cards = fallback_cards(search_trip, links, reason)
 
-    search_trip["deal_space"] = deal_space
-    strategy = ai_strategy(search_trip, offers, reason)
-    plan = trip_plan_line(search_trip)
-    reply = ai_chat_reply(message, search_trip, offers, cards, links, reason, plan, strategy, history)
+    intelligence = build_price_intelligence(search_trip, offers, deal_space, reason)
+    record_price_observation(search_trip, offers, intelligence)
+    trace.append(trace_step("feature_engine", "done", "Price, time, stops, spread, and session-history features calculated."))
+    trace.append(trace_step("ai_ml_intelligence", "done", intelligence["prediction"]))
+    trace.append(trace_step("decision_engine", intelligence["decision"], intelligence["summary"], confidence=intelligence["confidence"]))
 
-    return jsonify({
+    strategy = ai_strategy(search_trip, offers, reason, intelligence)
+    plan = trip_plan_line(search_trip)
+    reply = ai_chat_reply(message, search_trip, offers, cards, links, reason, plan, strategy, history, intelligence)
+    trace.append(trace_step("llm_explanation", "done", "Natural-language explanation generated from structured pricing facts."))
+    trace.append(trace_step("results_experience", "ready", "Cards, links, intelligence, and decision returned to the UI."))
+    trace.append(trace_step("feedback_learning_loop", "ready", "UI can submit feedback for future scoring improvements."))
+    trace.append(trace_step("monitoring_evals_safety", "logged", "Request outcome recorded without secrets."))
+
+    return {
         "complete": True,
         "reply": reply,
         "ai_enabled": bool(client),
         "duffel_enabled": bool(DUFFEL_ACCESS_TOKEN),
         "trip": search_trip,
         "strategy": strategy,
+        "intelligence": intelligence,
         "cards": cards,
         "offers": offers,
         "deal_space": deal_space,
+        "providers": provider_status_snapshot(),
+        "platform_trace": trace,
         "links": links,
         "reason": reason
-    })
-
-@app.route("/api/search", methods=["POST"])
-def search():
-    data = request.get_json(silent=True) or {}
-
-    trip = {
-        "origin": normalize_airport(data.get("origin", "LGA")),
-        "destination": normalize_airport(data.get("destination", "BOS")),
-        "trip_type": data.get("tripType", "oneway"),
-        "depart_date": data.get("departDate", ""),
-        "return_date": data.get("returnDate", ""),
-        "adults": parse_passenger_count(data.get("adults", 1), default=1, minimum=1),
-        "children": parse_passenger_count(data.get("children", 0)),
-        "infants": parse_passenger_count(data.get("infants", 0)),
-        "priority": data.get("priority", "balanced"),
-        "cabin": data.get("cabin", "economy"),
-        "seat": data.get("seat", "none"),
-        "preference": data.get("preference", "")
     }
 
-    if not trip["origin"] or not trip["destination"]:
-        return jsonify({"error": "Origin and destination are required."}), 400
-
-    if not is_valid_date(trip["depart_date"]):
-        return jsonify({"error": "A valid departure date is required."}), 400
-
-    if trip["trip_type"] == "roundtrip" and not is_valid_date(trip["return_date"]):
-        return jsonify({"error": "A valid return date is required for round trips."}), 400
-
-    print("Trip search:", trip, flush=True)
-
+def orchestrate_search_trip(trip):
+    trace = [
+        trace_step("api_gateway", "passed", "Search payload validated."),
+        trace_step("data_quality_normalization", "done", "Airport, date, passenger, cabin, and priority values normalized.")
+    ]
     links = build_search_links(
         trip["origin"],
         trip["destination"],
@@ -1408,32 +1838,132 @@ def search():
         trip["return_date"]
     )
 
-    offers, reason = fetch_duffel_offers(trip)
+    offers, reason, deal_space = fetch_deal_space_offers(trip)
+    trip["deal_space"] = deal_space
+    trace.append(trace_step("flight_data_platform", reason, f"{len(offers)} offer(s) returned.", providers=provider_status_snapshot()))
 
-    if offers:
-        cards = cards_from_offers(offers, trip)
-    else:
-        cards = fallback_cards(trip, links, reason)
+    cards = cards_from_offers(offers, trip) if offers else fallback_cards(trip, links, reason)
+    intelligence = build_price_intelligence(trip, offers, deal_space, reason)
+    record_price_observation(trip, offers, intelligence)
+    strategy = ai_strategy(trip, offers, reason, intelligence)
+    trace.append(trace_step("decision_engine", intelligence["decision"], intelligence["summary"], confidence=intelligence["confidence"]))
 
-    strategy = ai_strategy(trip, offers, reason)
-
-    return jsonify({
+    return {
         "ai_enabled": bool(client),
         "duffel_enabled": bool(DUFFEL_ACCESS_TOKEN),
         "trip": trip,
         "strategy": strategy,
+        "intelligence": intelligence,
         "cards": cards,
         "offers": offers,
+        "deal_space": deal_space,
+        "providers": provider_status_snapshot(),
+        "platform_trace": trace,
         "links": links,
         "reason": reason
+    }
+
+def run_trip_understanding_evals():
+    results = []
+    for case in EVAL_CASES:
+        trip = merge_trip_updates(blank_chat_trip(), rule_extract_trip_details(case["message"]))
+        expected = case["expected"]
+        passed = all(trip.get(key) == value for key, value in expected.items())
+        results.append({
+            "name": case["name"],
+            "passed": passed,
+            "expected": expected,
+            "actual": {key: trip.get(key) for key in expected}
+        })
+
+    return {
+        "passed": sum(1 for item in results if item["passed"]),
+        "total": len(results),
+        "results": results
+    }
+
+@app.route("/api/chat", methods=["POST"])
+def chat():
+    if is_rate_limited("/api/chat", limit=25, window_seconds=60):
+        return json_error("Too many requests. Wait a minute and try again.", 429, "rate_limited")
+
+    payload, error = validate_chat_payload(request.get_json(silent=True) or {})
+    if error:
+        return json_error(error, 400, "invalid_chat_payload")
+
+    response = orchestrate_chat_trip(payload["message"], payload["trip"], payload["history"])
+    record_api_event("/api/chat", "ok", "chat completed", complete=response.get("complete"))
+    return jsonify(response)
+
+@app.route("/api/search", methods=["POST"])
+def search():
+    if is_rate_limited("/api/search", limit=20, window_seconds=60):
+        return json_error("Too many search requests. Wait a minute and try again.", 429, "rate_limited")
+
+    trip, error = validate_search_trip(request.get_json(silent=True) or {})
+    if error:
+        return json_error(error, 400, "invalid_search_payload")
+
+    print("Trip search:", trip, flush=True)
+    response = orchestrate_search_trip(trip)
+    record_api_event("/api/search", "ok", "search completed", offers=len(response.get("offers", [])))
+    return jsonify(response)
+
+@app.route("/api/feedback", methods=["POST"])
+def feedback():
+    if is_rate_limited("/api/feedback", limit=20, window_seconds=60):
+        return json_error("Too many feedback requests. Wait a minute and try again.", 429, "rate_limited")
+
+    data = request.get_json(silent=True) or {}
+    rating = str(data.get("rating") or "").strip().lower()
+    if rating not in ("helpful", "not_helpful"):
+        return json_error("Feedback rating must be helpful or not_helpful.", 400, "invalid_feedback")
+
+    FEEDBACK_EVENTS.append({
+        "rating": rating,
+        "decision": str(data.get("decision") or "")[:120],
+        "route": str(data.get("route") or "")[:80],
+        "comment": str(data.get("comment") or "")[:500],
+        "at": utc_now()
     })
+    del FEEDBACK_EVENTS[:-MAX_FEEDBACK_EVENTS]
+    record_api_event("/api/feedback", "ok", rating)
+    return jsonify({"status": "ok", "feedback_count": len(FEEDBACK_EVENTS)})
 
 @app.route("/api/health")
 def health():
     return jsonify({
         "status": "ok",
         "ai_enabled": bool(client),
-        "duffel_enabled": bool(DUFFEL_ACCESS_TOKEN)
+        "duffel_enabled": bool(DUFFEL_ACCESS_TOKEN),
+        "providers": provider_status_snapshot(),
+        "layers": PLATFORM_LAYERS
+    })
+
+@app.route("/api/metrics")
+def metrics():
+    status_counts = {}
+    for event in API_EVENTS:
+        status_counts[event["status"]] = status_counts.get(event["status"], 0) + 1
+
+    return jsonify({
+        "status": "ok",
+        "events": len(API_EVENTS),
+        "status_counts": status_counts,
+        "price_observations": len(PRICE_OBSERVATIONS),
+        "feedback_events": len(FEEDBACK_EVENTS),
+        "providers": provider_status_snapshot(),
+        "layers": PLATFORM_LAYERS
+    })
+
+@app.route("/api/evals")
+def evals():
+    results = run_trip_understanding_evals()
+    record_api_event("/api/evals", "ok", f"{results['passed']} of {results['total']} passed")
+    return jsonify({
+        "status": "ok" if results["passed"] == results["total"] else "needs_attention",
+        "suite": "trip_understanding",
+        **results
     })
 
 if __name__ == "__main__":

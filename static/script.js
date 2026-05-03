@@ -163,16 +163,97 @@ quickDepartDate.addEventListener("change", () => {
 
 quickReturnDate.addEventListener("change", syncDatePickerToTripState);
 
+function renderList(items = []) {
+    return items.length
+        ? `<ul>${items.map(item => `<li>${escapeHTML(item)}</li>`).join("")}</ul>`
+        : `<p class="muted">No signal yet.</p>`;
+}
+
+function renderMetrics(metrics = {}) {
+    return Object.entries(metrics).map(([label, value]) => `
+        <div>
+            <strong>${escapeHTML(label.replaceAll("_", " "))}</strong>
+            <span>${escapeHTML(value ?? "n/a")}</span>
+        </div>
+    `).join("");
+}
+
+function renderSources(sources = []) {
+    return sources.map(source => `
+        <div class="source-row">
+            <strong>${escapeHTML(source.name)}</strong>
+            <span>${escapeHTML(source.status)}</span>
+            <p>${escapeHTML(source.detail)}</p>
+        </div>
+    `).join("");
+}
+
 function renderStrategy(data) {
     const trip = data.trip || {};
+    const intelligence = data.intelligence || {};
+    const route = `${trip.origin || ""} -> ${trip.destination || ""}`;
     strategyBox.innerHTML = `
         <div class="strategy-box">
-            <h2>Best flight strategy</h2>
-            <p>${escapeHTML(data.strategy || data.reply)}</p>
-            <small>${escapeHTML(trip.origin)} -> ${escapeHTML(trip.destination)}</small>
+            <div class="strategy-head">
+                <div>
+                    <span>Decision engine</span>
+                    <h2>${escapeHTML(intelligence.decision || "Best flight strategy")}</h2>
+                </div>
+                <strong>${escapeHTML(intelligence.confidence || "checking")} confidence</strong>
+            </div>
+
+            <p>${escapeHTML(intelligence.summary || data.strategy || data.reply)}</p>
+            <p class="prediction">${escapeHTML(intelligence.prediction || "")}</p>
+            <small>${escapeHTML(route)}</small>
+
+            <div class="intelligence-grid">
+                <section class="intel-panel">
+                    <h3>Price signals</h3>
+                    ${renderList(intelligence.signals || [])}
+                </section>
+                <section class="intel-panel">
+                    <h3>Anti-pricing moves</h3>
+                    ${renderList(intelligence.anti_pricing_moves || [])}
+                </section>
+                <section class="intel-panel">
+                    <h3>Sources checked</h3>
+                    ${renderSources(intelligence.sources || [])}
+                </section>
+                <section class="intel-panel">
+                    <h3>Feature engine</h3>
+                    <div class="metrics compact">${renderMetrics(intelligence.metrics || {})}</div>
+                </section>
+            </div>
+
+            <div class="feedback-row" data-decision="${escapeHTML(intelligence.decision || "")}" data-route="${escapeHTML(route)}">
+                <span>Was this recommendation useful?</span>
+                <button type="button" data-feedback="helpful">Helpful</button>
+                <button type="button" data-feedback="not_helpful">Not helpful</button>
+            </div>
         </div>
     `;
 }
+
+async function sendFeedback(rating, decision, route) {
+    try {
+        await fetch("/api/feedback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rating, decision, route })
+        });
+        showStatus("Feedback saved. AIFlight will use it in the learning loop.");
+    } catch (error) {
+        showStatus("Feedback could not be saved right now.", true);
+    }
+}
+
+strategyBox.addEventListener("click", event => {
+    const button = event.target.closest("[data-feedback]");
+    if (!button) return;
+
+    const row = button.closest(".feedback-row");
+    sendFeedback(button.dataset.feedback, row?.dataset.decision || "", row?.dataset.route || "");
+});
 
 function renderResults(data) {
     const cards = data.cards || [];
@@ -238,7 +319,7 @@ async function sendChatMessage(message) {
         chatHistory.push({ role: "assistant", content: data.reply });
 
         if (data.complete) {
-            showStatus(data.offers && data.offers.length ? "Live prices found." : "Search complete, but no live fare was returned.");
+            showStatus(data.intelligence?.decision || (data.offers && data.offers.length ? "Live prices found." : "Search complete, but no live fare was returned."));
             renderStrategy(data);
             renderResults(data);
         } else {
