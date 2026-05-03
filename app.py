@@ -5,6 +5,7 @@ import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+from difflib import get_close_matches
 from urllib.parse import quote_plus
 from flask import Flask, render_template, request, jsonify
 
@@ -58,6 +59,36 @@ AIRPORT_MAP = {
     "rome": "FCO", "fco": "FCO",
     "tokyo": "HND", "hnd": "HND",
     "toronto": "YYZ", "yyz": "YYZ"
+}
+
+TYPO_MAP = {
+    "wana": "want",
+    "wanna": "want",
+    "wnt": "want",
+    "fligt": "flight",
+    "flght": "flight",
+    "frm": "from",
+    "fro": "from",
+    "wit": "with",
+    "wth": "with",
+    "frend": "friend",
+    "frends": "friends",
+    "freind": "friend",
+    "freinds": "friends",
+    "won": "one",
+    "comfrt": "comfort",
+    "comft": "comfort",
+    "retun": "return",
+    "bak": "back",
+    "wrld": "world",
+    "texs": "texas",
+    "adlt": "adult",
+    "adlut": "adult",
+    "pariss": "paris",
+    "parisss": "paris",
+    "londn": "london",
+    "londen": "london",
+    "eygpt": "egypt"
 }
 
 WORLD_CUP_TEXAS_FIRST_MATCH = {
@@ -326,7 +357,31 @@ def normalize_airport(value):
         if re.search(rf"\b{re.escape(name)}\b", key):
             return code
 
+    for token in key.split():
+        matches = get_close_matches(token, AIRPORT_MAP.keys(), n=1, cutoff=0.82)
+        if matches:
+            return AIRPORT_MAP[matches[0]]
+
     return value.upper()
+
+def normalize_user_text(text):
+    text = str(text or "").lower()
+    text = re.sub(r"[^a-z0-9/., -]+", " ", text)
+    tokens = []
+    for token in text.split():
+        clean = re.sub(r"[^a-z0-9]+", "", token)
+        replacement = TYPO_MAP.get(clean)
+        if replacement:
+            token = replacement
+        tokens.append(token)
+
+    normalized = " ".join(tokens)
+    normalized = re.sub(r"\bl\s*a\b", "la", normalized)
+    normalized = re.sub(r"\bme and my friend\b", "2 adults", normalized)
+    normalized = re.sub(r"\bme and one friend\b", "2 adults", normalized)
+    normalized = re.sub(r"\bmy friend and me\b", "2 adults", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
 
 def parse_passenger_count(value, default=0, minimum=0):
     try:
@@ -568,17 +623,17 @@ def parse_trip_duration_days(text):
     return None
 
 def has_date_evidence(text):
-    lower = (text or "").lower()
+    lower = normalize_user_text(text)
     return bool(parse_chat_date(lower) or parse_flexible_date_range(lower) or detect_date_window(lower))
 
 def has_passenger_evidence(text):
-    lower = (text or "").lower()
+    lower = normalize_user_text(text)
     return bool(re.search(r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:adult|adults|passenger|passengers|people|person|traveler|travelers|friend|friends)\b", lower)) or any(
         phrase in lower for phrase in ("solo", "alone", "just me", "with my wife", "with my husband", "my partner")
     )
 
 def companion_adult_count(text):
-    lower = (text or "").lower()
+    lower = normalize_user_text(text)
     match = re.search(r"\bwith\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:friend|friends|adult|adults|people|traveler|travelers)\b", lower)
     if not match:
         return None
@@ -613,7 +668,7 @@ def is_missing_info_question(text):
     return any(term in lower for term in ("what info", "what information", "what am i missing", "what im missing", "what i'm missing", "what do you need"))
 
 def detect_world_cup_texas_request(text):
-    lower = (text or "").lower()
+    lower = normalize_user_text(text)
     if "world cup" not in lower or "texas" not in lower:
         return False
     return any(word in lower for word in ("first", "earliest", "only one", "one match", "1 match"))
@@ -631,7 +686,7 @@ def resolve_world_cup_texas_trip(text):
     if not detect_world_cup_texas_request(text):
         return {}
 
-    lower = (text or "").lower()
+    lower = normalize_user_text(text)
     match_date = datetime.strptime(WORLD_CUP_TEXAS_FIRST_MATCH["date"], "%Y-%m-%d").date()
     depart_offset = 1
     return_offset = 1
@@ -668,17 +723,22 @@ def resolve_world_cup_texas_trip(text):
 
 def rule_extract_trip_details(message):
     text = (message or "").strip()
-    lower = text.lower()
+    lower = normalize_user_text(text)
     updates = {}
 
     if is_missing_info_question(lower):
         return {}
 
     route_stop = r"(?:[.,]|$|\s+\d|\s+jan|\s+january|\s+feb|\s+february|\s+mar|\s+march|\s+apr|\s+april|\s+may|\s+jun|\s+june|\s+jul|\s+july|\s+aug|\s+august|\s+sep|\s+sept|\s+september|\s+oct|\s+october|\s+nov|\s+november|\s+dec|\s+december|\s+on|\s+next|\s+in|\s+with|\s+for|\s+and|\s+come\s+back|\s+return)"
-    reverse_route_match = re.search(rf"\b(?:visit|go to|want|need)\s+([a-zA-Z .]+?)\s+from\s+([a-zA-Z .]+?){route_stop}", lower)
+    reverse_route_match = re.search(rf"\b(?:visit|go|go to|want|need|fly|travel)\s+([a-zA-Z .]+?)\s+from\s+([a-zA-Z .]+?){route_stop}", lower)
     if reverse_route_match:
         updates["destination"] = normalize_airport(reverse_route_match.group(1))
         updates["origin"] = normalize_airport(reverse_route_match.group(2))
+
+    bare_destination_from = re.search(rf"^\s*([a-zA-Z .]+?)\s+from\s+([a-zA-Z .]+?){route_stop}", lower)
+    if bare_destination_from and not updates.get("destination"):
+        updates["destination"] = normalize_airport(bare_destination_from.group(1))
+        updates["origin"] = normalize_airport(bare_destination_from.group(2))
 
     simple_destination = re.search(rf"\b(?:go|fly|travel|visit|going|flying|traveling|visiting)\s+to\s+([a-zA-Z .]+?){route_stop}", lower)
     if simple_destination and not is_non_place_phrase(simple_destination.group(1)):
@@ -1066,9 +1126,11 @@ def build_perception(message, local_updates):
     fields_seen = sorted([key for key, value in local_updates.items() if value not in ("", None, {}, [])])
     validation = []
 
-    if not has_date_evidence(message):
+    normalized_message = normalize_user_text(message)
+
+    if not has_date_evidence(normalized_message):
         validation.append("No exact departure date was stated.")
-    if "friend" in message.lower() and "adults" not in local_updates:
+    if "friend" in normalized_message and "adults" not in local_updates:
         validation.append("Friends were mentioned without a clear count.")
 
     confidence = "high" if fields_seen and not validation else "medium" if fields_seen else "low"
@@ -1124,7 +1186,7 @@ def safe_ai_trip_merge(message, current_trip, local_updates, ai_trip):
 
     ai_clean = coerce_chat_trip(ai_trip)
     safe_updates = {}
-    lower = (message or "").lower()
+    lower = normalize_user_text(message)
     destination_intent = any(term in lower for term in (" to ", "visit", "go", "fly", "travel", "destination"))
     origin_intent = bool(re.search(r"\b(?:from|depart|departure|leaving|leave|start)\b", lower))
 
@@ -1162,7 +1224,7 @@ def evaluate_brain_state(message, trip, perception):
 
     if not has_date_evidence(message) and not trip.get("depart_date"):
         warnings.append("No departure date evidence; do not search yet.")
-    if "friend" in message.lower() and not has_passenger_evidence(message):
+    if "friend" in normalize_user_text(message) and not has_passenger_evidence(message):
         warnings.append("Passenger count is ambiguous.")
     if trip.get("origin") in NEARBY_AIRPORTS:
         strategy_tests.append("test nearby origin airports")
