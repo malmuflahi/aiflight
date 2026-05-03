@@ -42,20 +42,21 @@ def add_security_headers(response):
     return response
 
 AIRPORT_MAP = {
-    "egypt": "CAI", "eygpt": "CAI", "egpyt": "CAI", "egyptt": "CAI", "cairo": "CAI",
-    "new york": "JFK", "nyc": "JFK",
+    "egypt": "CAI", "eygpt": "CAI", "egpyt": "CAI", "egyptt": "CAI", "cairo": "CAI", "cai": "CAI",
+    "new york": "JFK", "newyork": "JFK", "nyc": "JFK",
     "manhattan": "JFK", "brooklyn": "JFK",
-    "lga": "LGA", "jfk": "JFK", "ewr": "EWR",
-    "boston": "BOS", "bos": "BOS",
+    "lga": "LGA", "laguardia": "LGA", "la guardia": "LGA", "jfk": "JFK", "ewr": "EWR",
+    "boston": "BOS", "bostn": "BOS", "bos": "BOS",
     "london": "LHR", "londen": "LHR", "lhr": "LHR", "heathrow": "LHR",
     "houston": "IAH", "iah": "IAH", "hou": "HOU",
     "dallas": "DFW", "arlington": "DFW", "dfw": "DFW",
-    "dubai": "DXB", "los angeles": "LAX", "la": "LAX",
+    "dubai": "DXB", "dubia": "DXB", "dubi": "DXB", "dxb": "DXB",
+    "los angeles": "LAX", "los angels": "LAX", "los anglees": "LAX", "la": "LAX", "lax": "LAX",
     "san francisco": "SFO", "sfo": "SFO",
     "chicago": "ORD", "ord": "ORD",
     "miami": "MIA", "mia": "MIA",
     "atlanta": "ATL", "atl": "ATL",
-    "paris": "CDG", "cdg": "CDG",
+    "paris": "CDG", "prs": "CDG", "cdg": "CDG",
     "rome": "FCO", "fco": "FCO",
     "tokyo": "HND", "hnd": "HND",
     "toronto": "YYZ", "yyz": "YYZ"
@@ -80,15 +81,24 @@ TYPO_MAP = {
     "comft": "comfort",
     "retun": "return",
     "bak": "back",
+    "trp": "trip",
     "wrld": "world",
+    "worldcup": "world cup",
     "texs": "texas",
     "adlt": "adult",
     "adlut": "adult",
+    "adlts": "adults",
+    "adults.": "adults",
     "pariss": "paris",
     "parisss": "paris",
+    "prs": "paris",
     "londn": "london",
     "londen": "london",
-    "eygpt": "egypt"
+    "eygpt": "egypt",
+    "egpyt": "egypt",
+    "dubia": "dubai",
+    "dubi": "dubai",
+    "newyork": "new york"
 }
 
 WORLD_CUP_TEXAS_FIRST_MATCH = {
@@ -345,6 +355,10 @@ def normalize_airport(value):
     previous_key = None
     while key and key != previous_key:
         previous_key = key
+        key = re.sub(r"^(?:i\s+)?(?:want|need)\s+(?:to\s+)?(?:go\s+)?(?:flight\s+)?(?:to\s+)?", "", key).strip()
+        key = re.sub(r"^(?:book\s+me)\s+(?:flight\s+)?(?:to\s+)?", "", key).strip()
+        key = re.sub(r"^(?:depart|departure|leaving|leave|start)\s+(?:from\s+)?", "", key).strip()
+        key = re.sub(r"^flight\s+(?:to\s+)?", "", key).strip()
         key = re.sub(r"^(?:to|for)\s+", "", key).strip()
         key = re.sub(r"^(?:go|going|fly|flying|travel|traveling|visit|visiting)\s+(?:to\s+)?", "", key).strip()
     if key in AIRPORT_MAP:
@@ -500,17 +514,15 @@ def parse_chat_date(text):
     if valid_iso:
         return valid_iso
 
-    slash_dates = []
+    found = []
     for month, day, year in re.findall(r"\b(\d{1,2})/(\d{1,2})/(20\d{2})\b", text):
         try:
-            slash_dates.append(datetime(int(year), int(month), int(day)).date().strftime("%Y-%m-%d"))
+            found.append(datetime(int(year), int(month), int(day)).date().strftime("%Y-%m-%d"))
         except ValueError:
             continue
-    if slash_dates:
-        return slash_dates
 
     if "tomorrow" in text:
-        return [(today + timedelta(days=1)).strftime("%Y-%m-%d")]
+        found.append((today + timedelta(days=1)).strftime("%Y-%m-%d"))
 
     months = {
         "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
@@ -519,7 +531,6 @@ def parse_chat_date(text):
         "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12
     }
 
-    found = []
     month_pattern = "|".join(months)
     patterns = [
         rf"\b({month_pattern})\s+(\d{{1,2}})(?:,?\s*(20\d{{2}}))?\b",
@@ -629,11 +640,17 @@ def has_date_evidence(text):
 def has_passenger_evidence(text):
     lower = normalize_user_text(text)
     return bool(re.search(r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:adult|adults|passenger|passengers|people|person|traveler|travelers|friend|friends)\b", lower)) or any(
-        phrase in lower for phrase in ("solo", "alone", "just me", "with my wife", "with my husband", "my partner")
+        phrase in lower for phrase in ("solo", "alone", "just me", "me only", "myself", "with my wife", "with my husband", "my partner")
     )
 
 def companion_adult_count(text):
     lower = normalize_user_text(text)
+    match = re.search(r"\bme\s+and\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:friend|friends|adult|adults|people|traveler|travelers)\b", lower)
+    if match:
+        companions = parse_number_token(match.group(1), 0)
+        if companions > 0:
+            return min(9, companions + 1)
+
     match = re.search(r"\bwith\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:friend|friends|adult|adults|people|traveler|travelers)\b", lower)
     if not match:
         return None
@@ -660,6 +677,12 @@ def is_place_pronoun(value):
 def is_non_place_phrase(value):
     value = (value or "").lower()
     return any(term in value for term in ("week", "day", "night", "vacation", "vecation", "adult", "price", "budget"))
+
+def normalized_place_candidate(value):
+    if is_place_pronoun(value) or is_non_place_phrase(value):
+        return ""
+    code = normalize_airport(value)
+    return code if is_airport_code(code) else ""
 
 def is_missing_info_question(text):
     lower = (text or "").lower()
@@ -729,7 +752,18 @@ def rule_extract_trip_details(message):
     if is_missing_info_question(lower):
         return {}
 
-    route_stop = r"(?:[.,]|$|\s+\d|\s+jan|\s+january|\s+feb|\s+february|\s+mar|\s+march|\s+apr|\s+april|\s+may|\s+jun|\s+june|\s+jul|\s+july|\s+aug|\s+august|\s+sep|\s+sept|\s+september|\s+oct|\s+october|\s+nov|\s+november|\s+dec|\s+december|\s+on|\s+next|\s+in|\s+with|\s+for|\s+and|\s+come\s+back|\s+return)"
+    route_stop = r"(?:[.,]|$|\s+\d|\s+from|\s+to|\s+depart|\s+departure|\s+leaving|\s+leave|\s+start|\s+jan|\s+january|\s+feb|\s+february|\s+mar|\s+march|\s+apr|\s+april|\s+may|\s+jun|\s+june|\s+jul|\s+july|\s+aug|\s+august|\s+sep|\s+sept|\s+september|\s+oct|\s+october|\s+nov|\s+november|\s+dec|\s+december|\s+on|\s+next|\s+in|\s+with|\s+for|\s+and|\s+back|\s+come\s+back|\s+return)"
+    direct_route_match = re.search(rf"\b([a-zA-Z .]+?)\s+to\s+([a-zA-Z .]+?){route_stop}", lower)
+    if direct_route_match:
+        origin_candidate = normalized_place_candidate(direct_route_match.group(1))
+        destination_candidate = normalized_place_candidate(direct_route_match.group(2))
+        if (
+            origin_candidate
+            and destination_candidate
+        ):
+            updates["origin"] = origin_candidate
+            updates["destination"] = destination_candidate
+
     reverse_route_match = re.search(rf"\b(?:visit|go|go to|want|need|fly|travel)\s+([a-zA-Z .]+?)\s+from\s+([a-zA-Z .]+?){route_stop}", lower)
     if reverse_route_match:
         updates["destination"] = normalize_airport(reverse_route_match.group(1))
@@ -740,43 +774,56 @@ def rule_extract_trip_details(message):
         updates["destination"] = normalize_airport(bare_destination_from.group(1))
         updates["origin"] = normalize_airport(bare_destination_from.group(2))
 
-    simple_destination = re.search(rf"\b(?:go|fly|travel|visit|going|flying|traveling|visiting)\s+to\s+([a-zA-Z .]+?){route_stop}", lower)
-    if simple_destination and not is_non_place_phrase(simple_destination.group(1)):
-        updates["destination"] = normalize_airport(simple_destination.group(1))
+    bare_destination_depart = re.search(rf"^\s*([a-zA-Z .]+?)\s+(?:depart|departure|leaving|leave|start)\s+([a-zA-Z .]+?){route_stop}", lower)
+    if bare_destination_depart and not updates.get("destination"):
+        updates["destination"] = normalize_airport(bare_destination_depart.group(1))
+        updates["origin"] = normalize_airport(bare_destination_depart.group(2))
+
+    simple_destination_patterns = [
+        rf"\b(?:want|need)\s+(?:to\s+)?(?:go|fly|travel|visit)\s+(?:to\s+)?([a-zA-Z .]+?){route_stop}",
+        rf"\b(?:want|need|book me)\s+(?:flight\s+)?to\s+([a-zA-Z .]+?){route_stop}",
+        rf"\b(?:go|fly|travel|visit|going|flying|traveling|visiting)\s+to\s+([a-zA-Z .]+?){route_stop}",
+    ]
+    for pattern in simple_destination_patterns:
+        simple_destination = re.search(pattern, lower)
+        if not simple_destination or "destination" in updates or " from " in f" {simple_destination.group(1)} ":
+            continue
+        destination_candidate = normalized_place_candidate(simple_destination.group(1))
+        if destination_candidate:
+            updates["destination"] = destination_candidate
+            break
 
     route_match = re.search(rf"\bfrom\s+([a-zA-Z .]+?)\s+(?:to|for)\s+([a-zA-Z .]+?){route_stop}", lower)
     if route_match:
         updates["origin"] = normalize_airport(route_match.group(1))
-        if not is_place_pronoun(route_match.group(2)):
+        if not is_place_pronoun(route_match.group(2)) and not is_non_place_phrase(route_match.group(2)):
             updates["destination"] = normalize_airport(route_match.group(2))
     else:
-        to_match = re.search(rf"\b(?:to|for)\s+([a-zA-Z .]+?){route_stop}", lower)
-        if (
-            to_match
-            and "destination" not in updates
-            and " from " not in f" {to_match.group(1)} "
-            and not is_place_pronoun(to_match.group(1))
-            and not is_non_place_phrase(to_match.group(1))
-        ):
-            updates["destination"] = normalize_airport(to_match.group(1))
+        for to_match in re.finditer(rf"\b(?:to|for)\s+(?!go\b|fly\b|travel\b|visit\b)([a-zA-Z .]+?){route_stop}", lower):
+            if "destination" in updates or " from " in f" {to_match.group(1)} ":
+                continue
+            destination_candidate = normalized_place_candidate(to_match.group(1))
+            if destination_candidate:
+                updates["destination"] = destination_candidate
+                break
 
         from_match = re.search(rf"\bfrom\s+([a-zA-Z .]+?){route_stop}", lower)
         if from_match:
             updates["origin"] = normalize_airport(from_match.group(1))
 
-    origin_followup = re.search(r"\b(?:depart|departure|leaving|leave|start)\s+(?:from\s+)?([a-zA-Z .]+?)(?:[.,]|$)", lower)
+    origin_followup = re.search(rf"\b(?:depart|departure|leaving|leave|start)\s+(?:from\s+)?([a-zA-Z .]+?){route_stop}", lower)
     if origin_followup:
         updates["origin"] = normalize_airport(origin_followup.group(1))
 
-    city_definition = re.search(r"\b(nyc|new york|jfk|lga|ewr)\s+(?:is|means)\s+(?:new york|nyc)\b", lower)
+    city_definition = re.search(r"\b(nyc|new york|newyork|jfk|lga|ewr)\s+(?:is|means)\s+(?:new york|nyc)\b", lower)
     if city_definition:
         updates["origin"] = normalize_airport(city_definition.group(1))
 
-    bare_origin = re.fullmatch(r"\s*(nyc|new york|jfk|lga|ewr)\s*", lower)
+    bare_origin = re.fullmatch(r"\s*(nyc|new york|newyork|jfk|lga|ewr|lax|la|los angeles|lga|laguardia|la guardia|bos|boston|bostn)\s*", lower)
     if bare_origin:
         updates["origin"] = normalize_airport(bare_origin.group(1))
 
-    if "round trip" in lower or "roundtrip" in lower or "coming back" in lower or "return" in lower or "vacation" in lower or "vecation" in lower:
+    if "round trip" in lower or "roundtrip" in lower or "coming back" in lower or "come back" in lower or "return" in lower or "vacation" in lower or "vecation" in lower:
         updates["trip_type"] = "roundtrip"
     elif "one way" in lower or "one-way" in lower or "single" in lower:
         updates["trip_type"] = "oneway"
@@ -815,7 +862,7 @@ def rule_extract_trip_details(message):
     elif (
         "friend" not in lower
         and "friends" not in lower
-        and ("solo" in lower or "alone" in lower or "just me" in lower or re.search(r"\bi\s+(?:want|need|am|will)\b", lower))
+        and ("solo" in lower or "alone" in lower or "just me" in lower or "me only" in lower or "myself" in lower or re.search(r"\bi\s+(?:want|need|am|will)\b", lower))
     ):
         updates["adults"] = 1
     if child_match:
@@ -933,6 +980,13 @@ def missing_chat_fields(trip):
         and not trip.get("trip_duration_days")
     ):
         missing.append("return date")
+    if (
+        trip.get("trip_type") == "roundtrip"
+        and is_valid_date(trip.get("depart_date"))
+        and is_valid_date(trip.get("return_date"))
+        and trip["return_date"] <= trip["depart_date"]
+    ):
+        missing.append("return date after departure")
     if not trip.get("adults"):
         missing.append("number of adults")
     return missing
