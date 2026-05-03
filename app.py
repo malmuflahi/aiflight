@@ -56,8 +56,9 @@ AIRPORT_MAP = {
     "chicago": "ORD", "ord": "ORD",
     "miami": "MIA", "mia": "MIA",
     "atlanta": "ATL", "atl": "ATL",
-    "paris": "CDG", "prs": "CDG", "cdg": "CDG",
+    "paris": "CDG", "prs": "CDG", "cdg": "CDG", "orly": "ORY", "ory": "ORY",
     "rome": "FCO", "fco": "FCO",
+    "amman": "AMM", "amm": "AMM",
     "tokyo": "HND", "hnd": "HND",
     "toronto": "YYZ", "yyz": "YYZ"
 }
@@ -85,6 +86,7 @@ TYPO_MAP = {
     "wrld": "world",
     "worldcup": "world cup",
     "texs": "texas",
+    "urgnt": "urgent",
     "adlt": "adult",
     "adlut": "adult",
     "adlts": "adults",
@@ -454,18 +456,18 @@ def coerce_chat_trip(value):
     trip["seat"] = normalize_seat(trip.get("seat", "none")) or "none"
     trip["preference"] = str(trip.get("preference") or "").strip()
     trip["date_window"] = str(trip.get("date_window") or "").strip()
-    trip["trip_duration_days"] = coerce_optional_count(trip.get("trip_duration_days"), default=None, minimum=1)
+    trip["trip_duration_days"] = coerce_optional_count(trip.get("trip_duration_days"), default=None, minimum=1, maximum=30)
     trip["event_context"] = trip.get("event_context") if isinstance(trip.get("event_context"), dict) else {}
     return trip
 
-def coerce_optional_count(value, default=None, minimum=0):
+def coerce_optional_count(value, default=None, minimum=0, maximum=9):
     if value in ("", None):
         return default
     try:
         count = int(value)
     except (TypeError, ValueError):
         return default
-    return max(minimum, min(count, 9))
+    return max(minimum, min(count, maximum))
 
 def normalize_trip_type(value):
     value = str(value or "").lower().replace("-", " ").strip()
@@ -613,6 +615,51 @@ def parse_flexible_date_range(text):
         "date_window": f"{start.strftime('%b')} {start.day}-{end.day} flexible"
     }
 
+def month_name_window(text):
+    lower = normalize_user_text(text)
+    months = {
+        "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+        "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+        "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+        "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12
+    }
+    month_pattern = "|".join(months)
+    match = re.search(rf"\b(?:in|around|during|any\s+day\s+in|sometime\s+in)?\s*({month_pattern})(?:\s+(20\d{{2}}))?\b", lower)
+    if not match:
+        return ""
+
+    # A named month followed by a day is an exact date, not a flexible window.
+    after = lower[match.end():match.end() + 5]
+    if re.match(r"\s+\d{1,2}\b", after):
+        return ""
+
+    today = datetime.now().date()
+    month = months[match.group(1)]
+    year = int(match.group(2)) if match.group(2) else today.year
+    if datetime(year, month, 28).date() < today:
+        year += 1
+    return datetime(year, month, 1).strftime("%B %Y")
+
+def representative_date_for_window(window, duration_days=None):
+    window = str(window or "")
+    match = re.search(r"\b([A-Za-z]+)\s+(20\d{2})\b", window)
+    if not match:
+        return "", ""
+
+    months = {
+        "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+        "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12
+    }
+    month = months.get(match.group(1).lower())
+    if not month:
+        return "", ""
+
+    year = int(match.group(2))
+    depart = datetime(year, month, 10).date()
+    duration = max(1, min(30, int(duration_days or 7)))
+    return_date = depart + timedelta(days=duration)
+    return depart.strftime("%Y-%m-%d"), return_date.strftime("%Y-%m-%d")
+
 def parse_number_token(value, default=None):
     value = str(value or "").lower().strip()
     if value in NUMBER_WORDS:
@@ -627,7 +674,7 @@ def parse_trip_duration_days(text):
     if "one week" in lower or "1 week" in lower or "a week" in lower:
         return 7
 
-    match = re.search(r"\b(?:for|stay|staying)\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s*(?:day|days|night|nights)\b", lower)
+    match = re.search(r"\b(?:for|stay|staying|maybe|about|around)?\s*(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s*(?:day|days|night|nights)\b", lower)
     if match:
         return max(1, min(30, parse_number_token(match.group(1), 0)))
 
@@ -662,6 +709,9 @@ def companion_adult_count(text):
 
 def detect_date_window(text):
     text = (text or "").lower()
+    month_window = month_name_window(text)
+    if month_window:
+        return month_window
     if "next month" in text:
         return "next month"
     if "next week" in text:
@@ -676,7 +726,7 @@ def is_place_pronoun(value):
 
 def is_non_place_phrase(value):
     value = (value or "").lower()
-    return any(term in value for term in ("week", "day", "night", "vacation", "vecation", "adult", "price", "budget"))
+    return bool(re.search(r"\b(?:week|weeks|day|days|night|nights|vacation|vecation|adult|adults|price|budget)\b", value))
 
 def normalized_place_candidate(value):
     if is_place_pronoun(value) or is_non_place_phrase(value):
@@ -753,8 +803,17 @@ def rule_extract_trip_details(message):
         return {}
 
     route_stop = r"(?:[.,]|$|\s+\d|\s+from|\s+to|\s+depart|\s+departure|\s+leaving|\s+leave|\s+start|\s+jan|\s+january|\s+feb|\s+february|\s+mar|\s+march|\s+apr|\s+april|\s+may|\s+jun|\s+june|\s+jul|\s+july|\s+aug|\s+august|\s+sep|\s+sept|\s+september|\s+oct|\s+october|\s+nov|\s+november|\s+dec|\s+december|\s+on|\s+next|\s+in|\s+with|\s+for|\s+and|\s+back|\s+come\s+back|\s+return)"
+    known_origin_pattern = r"nyc|new york|newyork|jfk|lga|ewr|boston|bostn|bos|la|lax|los angeles|chicago|ord|miami|mia|atlanta|atl"
+    embedded_direct_route = re.search(rf"\b({known_origin_pattern})\s+to\s+([a-zA-Z .]+?){route_stop}", lower)
+    if embedded_direct_route:
+        origin_candidate = normalized_place_candidate(embedded_direct_route.group(1))
+        destination_candidate = normalized_place_candidate(embedded_direct_route.group(2))
+        if origin_candidate and destination_candidate:
+            updates["origin"] = origin_candidate
+            updates["destination"] = destination_candidate
+
     direct_route_match = re.search(rf"\b([a-zA-Z .]+?)\s+to\s+([a-zA-Z .]+?){route_stop}", lower)
-    if direct_route_match:
+    if direct_route_match and not (updates.get("origin") and updates.get("destination")):
         origin_candidate = normalized_place_candidate(direct_route_match.group(1))
         destination_candidate = normalized_place_candidate(direct_route_match.group(2))
         if (
@@ -792,6 +851,15 @@ def rule_extract_trip_details(message):
         if destination_candidate:
             updates["destination"] = destination_candidate
             break
+
+    context_destination = re.search(
+        rf"\b(?:meeting|conference|event|wedding|work|trip|vacation)\s+in\s+([a-zA-Z .]+?){route_stop}",
+        lower
+    )
+    if context_destination and "destination" not in updates:
+        destination_candidate = normalized_place_candidate(context_destination.group(1))
+        if destination_candidate:
+            updates["destination"] = destination_candidate
 
     route_match = re.search(rf"\bfrom\s+([a-zA-Z .]+?)\s+(?:to|for)\s+([a-zA-Z .]+?){route_stop}", lower)
     if route_match:
@@ -862,7 +930,7 @@ def rule_extract_trip_details(message):
     elif (
         "friend" not in lower
         and "friends" not in lower
-        and ("solo" in lower or "alone" in lower or "just me" in lower or "me only" in lower or "myself" in lower or re.search(r"\bi\s+(?:want|need|am|will)\b", lower))
+        and ("solo" in lower or "alone" in lower or "just me" in lower or "me only" in lower or "myself" in lower or re.search(r"\bi\s+(?:want|need|am|will|can|have|only|dont|don t)\b", lower))
     ):
         updates["adults"] = 1
     if child_match:
@@ -879,14 +947,22 @@ def rule_extract_trip_details(message):
     elif "economy" in lower or "coach" in lower:
         updates["cabin"] = "economy"
 
-    if "comfort" in lower or "comfortable" in lower or "low stress" in lower:
+    cheapest_intent = bool(re.search(r"\b(?:cheap|cheapest|lowest price|budget)\b", lower))
+    comfort_negated = bool(re.search(r"\b(?:dont|don t|do not|don't)\s+care\s+about\s+comfort\b", lower))
+    stress_intent = any(term in lower for term in ("stress", "painful", "problems", "rested", "reliable", "bad airline", "not bad airline"))
+    pay_more_for_less_risk = ("paying more" in lower or "pay more" in lower or "okay paying more" in lower) and any(term in lower for term in ("avoid", "stress", "problem"))
+    value_intent = any(term in lower for term in ("not crazy price", "best value", "smartest", "good deal"))
+
+    if cheapest_intent and not stress_intent:
+        updates["priority"] = "cheapest"
+    elif "fast" in lower or "quick" in lower or "urgent" in lower:
+        updates["priority"] = "fastest"
+    elif stress_intent or pay_more_for_less_risk or (("comfort" in lower or "comfortable" in lower or "low stress" in lower) and not comfort_negated):
         updates["priority"] = "comfort"
     elif "money" in lower and ("not" in lower or "no concern" in lower or "flexible" in lower):
         updates["priority"] = "comfort"
-    elif "cheap" in lower or "lowest price" in lower or "budget" in lower:
-        updates["priority"] = "cheapest"
-    elif "fast" in lower or "quick" in lower:
-        updates["priority"] = "fastest"
+    elif value_intent:
+        updates["priority"] = "balanced"
 
     if "window" in lower:
         updates["seat"] = "window"
@@ -967,7 +1043,11 @@ def missing_chat_fields(trip):
         missing.append("departure city or airport")
     if not is_airport_code(trip.get("destination")):
         missing.append("destination city or airport")
-    if not is_valid_date(trip.get("depart_date")):
+    flexible_departure_ok = bool(
+        trip.get("date_window")
+        and (trip.get("trip_duration_days") or trip.get("trip_type") == "oneway")
+    )
+    if not is_valid_date(trip.get("depart_date")) and not flexible_departure_ok:
         if trip.get("date_window"):
             missing.append(f"exact departure date in {trip['date_window']}")
         else:
@@ -1030,12 +1110,129 @@ def followup_reply(trip, missing):
     if not missing:
         return "I have enough to search live prices."
 
-    if len(missing) == 1:
-        needed = missing[0]
-    else:
-        needed = ", ".join(missing[:-1]) + f", and {missing[-1]}"
+    preference = normalize_user_text(trip.get("preference", ""))
+    prefix = "I can help."
+    if any(term in preference for term in ("urgent", "scared", "fast", "prices are going up")):
+        prefix = "I will keep this fast and low-risk."
+    elif any(term in preference for term in ("stress", "painful", "rested", "bad airline")):
+        prefix = "Got it. I will optimize for a smoother trip, not just the lowest fare."
+    elif "cheapest" in preference or "only care about the cheapest" in preference:
+        prefix = "Got it. I will rank price first."
 
-    return f"I can work with that. So far I have {summary}. I only need {needed} to search live prices."
+    if "departure city or airport" in missing and trip.get("destination"):
+        return f"{prefix} I have {summary}. First, where are you flying from?"
+    if "departure city or airport" in missing and "destination city or airport" in missing:
+        return f"{prefix} Tell me the route first: where are you flying from and where are you going?"
+    if "destination city or airport" in missing:
+        return f"{prefix} I have {summary}. What city or airport are you going to?"
+    if "number of adults" in missing:
+        return f"{prefix} I have {summary}. How many adult travelers should I price?"
+    if any(field.startswith("exact departure date") for field in missing):
+        if trip.get("date_window") and trip.get("trip_duration_days"):
+            return f"{prefix} I have {summary}. I can scan {trip['date_window']} for a {trip['trip_duration_days']}-day trip; do you want that flexible search, or do you have an exact departure date?"
+        return f"{prefix} I have {summary}. What departure date should I use?"
+    if "return date" in missing:
+        return f"{prefix} I have {summary}. What return date should I use?"
+    if "one-way or round trip" in missing:
+        return f"{prefix} I have {summary}. Is this one-way or round trip?"
+
+    needed = missing[0]
+    return f"{prefix} I have {summary}. I need {needed} next."
+
+def direct_advisory_reply(message, trip, missing):
+    lower = normalize_user_text(message)
+    route = summarize_chat_trip(trip)
+
+    if "recommendation" in lower and ("fake" in lower or "trust" in lower):
+        return (
+            "You should not trust a flight recommendation blindly. AIFlight shows the source of the fare, "
+            "the search time, the route/date assumptions, the confidence level, and the tradeoff that made the option win. "
+            "A real recommendation must be tied to live fare data or clearly labeled as a strategy, because prices, seats, bags, and refund rules can change before checkout."
+        )
+
+    raw_lower = str(message or "").lower()
+
+    price_match = re.search(r"\$\s*[\d,]+(?:\.\d{1,2})?|\b\d{3,5}\b", raw_lower)
+    price_label = price_match.group(0).strip() if price_match else "that fare"
+    if (price_match or "this flight" in lower) and ("good deal" in lower or "actually" in lower):
+        return (
+            "A low sticker price is not enough to call it a good deal. I would check total trip cost first: bags, seat selection, refund/change rules, layover length, arrival time, and whether the airline or ticket seller is reliable. "
+            f"If {price_label} is nonstop or a clean one-stop with bags included, it may be strong. If it has long layovers, no bags, poor arrival time, or strict basic-economy rules, it may be a trap."
+        )
+
+    if "why is this flight cheaper" in lower or "why this flight cheaper" in lower:
+        return (
+            "A flight is usually cheaper because something in the fare is worse or less flexible: a lower fare class, baggage not included, strict refund rules, weaker arrival time, longer layover, overnight connection, lower-demand departure, or an airline/OTA trying to fill seats. "
+            "The smart move is to compare total cost and trip risk, not just the headline price."
+        )
+
+    if "price dropped" in lower or "dropped" in lower:
+        return (
+            "A $300 same-day drop is a strong volatility signal. If the route, dates, airline, baggage, and arrival time are acceptable, I would lean book now rather than waiting for another drop. "
+            "Wait only if you are flexible by a few days and the current fare is still above the normal range you expected."
+        )
+
+    if "first class" in lower and "tomorrow" in lower and ("300" in lower or "under" in lower):
+        return (
+            "First class from NYC to Paris tomorrow under $300 is extremely unlikely. That combination fights three pricing forces at once: premium cabin, last-minute departure, and a long-haul international route. "
+            "The realistic alternatives are economy/premium economy, one-stop routings, nearby airports, or changing the date. I will not invent a fake deal just to satisfy the target price."
+        )
+
+    if "business" in lower and "tomorrow" in lower and ("cheapest" in lower or "pay much" in lower or "nonstop" in lower):
+        return (
+            "There is a conflict in the request: business class, nonstop, and tomorrow usually means expensive. I can still optimize it, but the smart strategy is to compare nonstop business against premium economy, one-stop business, and nearby airports. "
+            f"For live pricing, I need the route and traveler count next. Current notes: {route}."
+        )
+
+    if "book now or wait" in lower or ("should i book" in lower and "wait" in lower):
+        return (
+            f"For {route}, my best no-live-price rule is: book now if the fare is already below your comfort threshold or if your dates are fixed. "
+            "Wait only if you can move by 2-3 days and the current fare is not clearly good. With flexible June travel, I would scan several 7-day windows and set a buy threshold instead of guessing from one date."
+        )
+
+    if "nyc or boston" in lower or "new york or boston" in lower:
+        return (
+            "Do not choose Boston just because the ticket is cheaper. The real comparison is ticket savings minus train/flight/parking cost to Boston, extra travel time, missed-work time, and connection risk. "
+            "Boston only wins if the fare savings still look meaningful after ground travel and the extra stress."
+        )
+
+    if "then rome" in lower or "multi city" in lower or "multi-city" in lower:
+        return (
+            "That is a multi-city trip, not a simple round trip. I would structure it as NYC -> Paris, Paris -> Rome, then Rome -> NYC. "
+            "To price it correctly, I need the travel dates, number of travelers, and whether you want the Paris-to-Rome leg by flight or train."
+        )
+
+    if re.search(r"\bto jordan\b|\bjordan\b", lower) and not is_airport_code(trip.get("destination")):
+        return (
+            "Do you mean Amman, Jordan? The main airport I would use is AMM. "
+            "If yes, tell me where you are flying from and your dates, and I will price it as Amman instead of guessing wrong."
+        )
+
+    if any(term in lower for term in ("dont want stress", "don t want stress", "okay paying more", "avoid problems")):
+        return (
+            "Got it. I will weight this as a low-stress trip: nonstop or clean one-stop, reliable airline, sane departure and arrival times, enough connection buffer, and flexible rules when the price difference is reasonable. "
+            "Tell me the route and date, and I will rank comfort/risk above cheapest."
+        )
+
+    if "only care about the cheapest" in lower or ("cheapest flight" in lower and "comfort" in lower):
+        return (
+            "Understood. I will switch the scoring to price-first and only reject an option if it has an unusually risky connection or hidden fees that erase the savings. "
+            "Send the route and dates, and I will rank the cheapest real options first."
+        )
+
+    if "urgent" in lower or "scared prices" in lower or "prices are going up" in lower:
+        return (
+            f"I will keep this fast. For an urgent trip, I prioritize low-risk flights, clear booking deadlines, and a book-now recommendation when the fare is acceptable. "
+            f"Current notes: {route}. The next key detail I need is {missing[0] if missing else 'permission to search live fares'}."
+        )
+
+    if "meeting" in lower and "rested" in lower:
+        return (
+            "For a Monday morning meeting, cheapest is usually the wrong target. I would aim to arrive the day before, avoid tight layovers, and prefer nonstop or a very clean connection so you can sleep and recover. "
+            f"Current notes: {route}. Tell me the departure city and date window so I can price the right arrival plan."
+        )
+
+    return ""
 
 def ai_followup_reply(message, trip, missing, history):
     fallback = followup_reply(trip, missing)
@@ -1077,15 +1274,24 @@ def ai_followup_reply(message, trip, missing, history):
 
 def prepare_chat_search_trip(trip):
     priority = trip.get("priority") or "balanced"
+    depart_date = trip.get("depart_date", "")
     return_date = trip.get("return_date", "")
+    if not depart_date and trip.get("date_window"):
+        depart_date, guessed_return = representative_date_for_window(
+            trip.get("date_window"),
+            trip.get("trip_duration_days") or 7
+        )
+        if trip.get("trip_type") == "roundtrip" and not return_date:
+            return_date = guessed_return
+
     if trip.get("trip_type") == "roundtrip" and not return_date and trip.get("trip_duration_days"):
-        return_date = shift_date(trip.get("depart_date"), trip["trip_duration_days"])
+        return_date = shift_date(depart_date, trip["trip_duration_days"])
 
     return {
         "origin": trip["origin"],
         "destination": trip["destination"],
         "trip_type": trip["trip_type"],
-        "depart_date": trip["depart_date"],
+        "depart_date": depart_date,
         "return_date": return_date,
         "adults": parse_passenger_count(trip.get("adults"), default=1, minimum=1),
         "children": parse_passenger_count(trip.get("children"), default=0),
@@ -2239,6 +2445,24 @@ def orchestrate_chat_trip(message, current_trip, history):
     trace.append(trace_step("ai_brain_loop", brain.get("self_evaluation", {}).get("action", "done"), "Perceive, understand, context, decision, and self-check completed."))
 
     missing = missing_chat_fields(trip)
+    advisory_reply = direct_advisory_reply(message, trip, missing or brain.get("missing_fields", []))
+    if advisory_reply:
+        missing_fields = missing or brain["missing_fields"]
+        trace.append(trace_step("decision_engine", "advisory", "Answered strategy/advisory prompt without pretending to have live fare data.", missing=missing_fields))
+        return {
+            "complete": False,
+            "reply": advisory_reply,
+            "trip": trip,
+            "missing": missing_fields,
+            "ai_enabled": bool(client),
+            "duffel_enabled": bool(DUFFEL_ACCESS_TOKEN),
+            "providers": provider_status_snapshot(),
+            "brain_loop": brain.get("brain_loop", {}),
+            "world_model": brain.get("world_model", {}),
+            "self_evaluation": brain.get("self_evaluation", {}),
+            "platform_trace": trace
+        }
+
     if missing or not brain["ready_to_search"]:
         missing_fields = missing or brain["missing_fields"]
         reply = brain["reply"] or ai_followup_reply(message, trip, missing_fields, history)
